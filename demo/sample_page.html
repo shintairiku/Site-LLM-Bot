@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>サンプルホームページ</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+        color: #10212b;
+        background:
+          radial-gradient(circle at top right, rgba(21, 94, 117, 0.16), transparent 32%),
+          linear-gradient(180deg, #f5f7f8, #ffffff 40%);
+      }
+
+      .hero {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 72px 24px 120px;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #d8eef4;
+        color: #155e75;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      h1 {
+        margin: 18px 0 12px;
+        font-size: clamp(32px, 6vw, 64px);
+        line-height: 1.08;
+      }
+
+      p {
+        max-width: 720px;
+        line-height: 1.8;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin-top: 32px;
+      }
+
+      .card {
+        padding: 20px;
+        border: 1px solid #dce6ea;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 16px 48px rgba(16, 33, 43, 0.06);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="hero">
+      <span class="eyebrow">サンプルサイト</span>
+      <h1>住まい相談の導線として<br />AIチャットボットを設置</h1>
+      <p>
+        このページは、住宅・リフォーム業向けAIチャットボットの設置イメージを確認するための
+        サンプルホームページです。次工程でウィジェット埋め込みテストを行う前提で、
+        ヒーロー領域と主要導線の見え方を先に整えています。
+      </p>
+      <section class="cards">
+        <article class="card">
+          <h2>新築相談</h2>
+          <p>家づくりの流れ、土地探し、資金計画の問い合わせ導線を想定しています。</p>
+        </article>
+        <article class="card">
+          <h2>リフォーム相談</h2>
+          <p>水回り、外装、断熱改修など、一次相談の受付導線を想定しています。</p>
+        </article>
+        <article class="card">
+          <h2>施工エリア確認</h2>
+          <p>よくある質問を短時間で解消できる構成を想定しています。</p>
+        </article>
+      </section>
+    </main>
+    <script
+      src="../static/mock-widget.js"
+      data-tenant-name="サンプル工務店"
+      data-color="#155e75"
+    ></script>
+  </body>
+</html>
