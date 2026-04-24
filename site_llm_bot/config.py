@@ -27,6 +27,10 @@ class Settings:
     openai_model: str
     app_host: str
     app_port: int
+    openai_timeout_seconds: float
+    session_ttl_seconds: int
+    max_history_messages: int
+    allowed_origins: list[str]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -36,4 +40,18 @@ class Settings:
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             app_host=os.getenv("APP_HOST", "127.0.0.1"),
             app_port=int(os.getenv("APP_PORT", "8000")),
+            openai_timeout_seconds=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
+            session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "1800")),
+            max_history_messages=int(os.getenv("MAX_HISTORY_MESSAGES", "6")),
+            allowed_origins=parse_csv_env(
+                os.getenv(
+                    "ALLOWED_ORIGINS",
+                    "http://127.0.0.1:8000,http://localhost:8000,null",
+                )
+            ),
         )
+
+
+def parse_csv_env(value: str) -> list[str]:
+    """カンマ区切り環境変数を配列へ変換する。"""
+    return [item.strip() for item in value.split(",") if item.strip()]

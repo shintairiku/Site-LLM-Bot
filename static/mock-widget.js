@@ -11,6 +11,7 @@
   const apiBase = script.dataset.apiBase || "http://127.0.0.1:8000";
   const tenantName = script.dataset.tenantName || "サンプル工務店";
   const accent = script.dataset.color || "#155e75";
+  let sessionId = null;
   const suggestions = [
     "施工エリアを教えてください",
     "相談の流れを知りたいです",
@@ -22,10 +23,6 @@
 
   // ランチャーボタンと本体パネルを先に構築し、以降の各関数は
   // messagesEl / suggestionsEl / statusEl / textarea を共有してUI更新を行う。
-  // createElementはJavaScript標準のAPIです。
-  // これを使うことで、DOM要素を動的に生成することができます。
-  // このウィジェットでは、ランチャーボタンと本体パネルを先に構築し、以降の各関数は
-  // messagesEl / suggestionsEl / statusEl / textarea を共有してUI更新を行うために使用しています。
   const launcher = document.createElement("button");
   launcher.className = "mock-chatbot-launcher";
   launcher.type = "button";
@@ -96,6 +93,7 @@
 
     try {
       const reply = await requestChatAnswer(text);
+      sessionId = reply.session_id || sessionId;
       addMessage(messagesEl, "bot", reply.answer);
       statusEl.textContent =
         reply.source === "openai" ? "OpenAI応答を受信しました" : "デモ応答を受信しました";
@@ -132,6 +130,7 @@
       body: JSON.stringify({
         message: text,
         page_url: window.location.href,
+        session_id: sessionId,
       }),
     });
     if (!response.ok) {
