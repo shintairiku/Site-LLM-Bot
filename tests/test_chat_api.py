@@ -45,6 +45,18 @@ async def test_chat_api_with_mock_openai() -> None:
             200,
             json={
                 "output_text": "施工エリアは東京都内を中心に対応しています。",
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "action": {
+                            "sources": [
+                                {
+                                    "url": "https://shintairiku.jp/company/",
+                                }
+                            ]
+                        },
+                    }
+                ],
             },
         )
 
@@ -68,6 +80,46 @@ async def test_chat_api_with_mock_openai() -> None:
     assert response.json()["source"] == "openai"
     assert "施工エリア" in response.json()["answer"]
     assert response.json()["session_id"]
+    await openai_client.aclose()
+
+
+@pytest.mark.anyio
+async def test_chat_api_returns_safe_message_when_allowed_domain_source_is_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "output_text": "他社サイト由来の情報が混ざる可能性のある回答",
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "action": {
+                            "sources": [
+                                {
+                                    "url": "https://example.com/article",
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+        )
+
+    openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(settings=build_settings(), openai_client=openai_client)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            headers={"Origin": "http://localhost:8000"},
+            json={"message": "会社の強みを教えてください"},
+        )
+
+    assert response.status_code == 200
+    assert "対象サイト内で確認できた情報のみ" in response.json()["answer"]
     await openai_client.aclose()
 
 

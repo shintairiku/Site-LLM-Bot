@@ -90,7 +90,7 @@ def create_app(
         session_store.append_message(session.session_id, "user", message)
 
         try:
-            answer = await chat_handler.generate_answer(
+            result = await chat_handler.generate_answer(
                 message=message,
                 page_url=request.page_url,
                 history=history,
@@ -101,8 +101,8 @@ def create_app(
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
 
-        session_store.append_message(session.session_id, "assistant", answer)
+        session_store.append_message(session.session_id, "assistant", result.answer)
         source = "openai" if app_settings.openai_api_key else "demo"
-        return ChatResponse(answer=answer, source=source, session_id=session.session_id)
+        return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
     return app

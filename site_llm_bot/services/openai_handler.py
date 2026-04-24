@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from site_llm_bot.services.session_store import ChatMessage
+
+
+@dataclass(slots=True)
+class ChatGenerationResult:
+    """LLM応答と、その応答が許可ドメインで裏取りできたかをまとめて返す。"""
+
+    answer: str
+    used_allowed_sources: bool
 
 
 class OpenAIChatHandler:
@@ -29,13 +39,16 @@ class OpenAIChatHandler:
         message: str,
         page_url: str | None = None,
         history: list[ChatMessage] | None = None,
-    ) -> str:
-        """ユーザー入力と履歴を OpenAI に渡し、最終テキストだけを返す。"""
+    ) -> ChatGenerationResult:
+        """ユーザー入力と履歴を OpenAI に渡し、裏取り状態付きで結果を返す。"""
         if not self._api_key:
-            return (
-                "現在はデモモードです。"
-                f" 受信した質問: {message}"
-                + (f" / 閲覧ページ: {page_url}" if page_url else "")
+            return ChatGenerationResult(
+                answer=(
+                    "現在はデモモードです。"
+                    f" 受信した質問: {message}"
+                    + (f" / 閲覧ページ: {page_url}" if page_url else "")
+                ),
+                used_allowed_sources=True,
             )
 
         payload = self._build_payload(message=message, page_url=page_url, history=history or [])
@@ -124,8 +137,8 @@ class OpenAIChatHandler:
         client: httpx.AsyncClient,
         headers: dict[str, str],
         payload: dict[str, Any],
-    ) -> str:
-        """OpenAI 応答から output_text を抽出する。"""
+    ) -> ChatGenerationResult:
+        """OpenAI 応答から本文と参照元ドメインを抽出し、安全側で結果を返す。"""
         response = await client.post(
             "https://api.openai.com/v1/responses",
             headers=headers,
@@ -133,9 +146,13 @@ class OpenAIChatHandler:
         )
         response.raise_for_status()
         data = response.json()
+        used_allowed_sources = self._has_allowed_domain_sources(data)
         answer = data.get("output_text")
         if isinstance(answer, str) and answer.strip():
-            return answer.strip()
+            return ChatGenerationResult(
+                answer=self._finalize_answer(answer.strip(), used_allowed_sources),
+                used_allowed_sources=used_allowed_sources,
+            )
 
         # output_text が無いケースでは output 配列の text をなめて結合する。
         texts: list[str] = []
@@ -144,4 +161,34 @@ class OpenAIChatHandler:
                 text = content.get("text")
                 if text:
                     texts.append(text)
-        return "\n".join(texts).strip() or "回答を生成できませんでした。"
+        merged = "\n".join(texts).strip() or "回答を生成できませんでした。"
+        return ChatGenerationResult(
+            answer=self._finalize_answer(merged, used_allowed_sources),
+            used_allowed_sources=used_allowed_sources,
+        )
+
+    # 参照元に許可ドメインが含まれない場合は、通常回答をそのまま返さず安全側へ倒す。
+    def _finalize_answer(self, answer: str, used_allowed_sources: bool) -> str:
+        if not self._search_allowed_domains:
+            return answer
+        if used_allowed_sources:
+            return answer
+        return (
+            "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
+            " この内容はサイト内で裏取りできなかったため、正確な案内のためにお問い合わせください。"
+        )
+
+    # OpenAIのweb_search結果に含まれる source URL を見て、許可ドメインの情報が使われたか判定する。
+    def _has_allowed_domain_sources(self, data: dict[str, Any]) -> bool:
+        allowed = [domain.lower() for domain in self._search_allowed_domains]
+        if not allowed:
+            return True
+
+        for item in data.get("output", []):
+            action = item.get("action") or {}
+            for source in action.get("sources", []):
+                url = source.get("url", "")
+                host = urlparse(url).netloc.lower()
+                if any(host == domain or host.endswith(f".{domain}") for domain in allowed):
+                    return True
+        return False
