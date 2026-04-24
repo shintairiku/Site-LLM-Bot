@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -14,6 +15,11 @@ from site_llm_bot.api.app import create_app
 from site_llm_bot.config import Settings
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 def build_settings(api_key: str | None = "test-key") -> Settings:
     return Settings(
         openai_api_key=api_key,
@@ -24,12 +30,17 @@ def build_settings(api_key: str | None = "test-key") -> Settings:
         session_ttl_seconds=1800,
         max_history_messages=6,
         allowed_origins=["http://localhost:8000"],
+        search_allowed_domains=["shintairiku.jp"],
     )
 
 
 @pytest.mark.anyio
 async def test_chat_api_with_mock_openai() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload["tools"][0]["type"] == "web_search"
+        assert payload["tools"][0]["filters"]["allowed_domains"] == ["shintairiku.jp"]
+        assert payload["include"] == ["web_search_call.action.sources"]
         return httpx.Response(
             200,
             json={
@@ -95,3 +106,10 @@ async def test_chat_api_rejects_invalid_origin() -> None:
         )
 
     assert response.status_code == 403
+
+
+def test_demo_and_static_routes_exist() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    assert "/demo" in paths
+    assert "/static" in paths

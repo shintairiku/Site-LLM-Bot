@@ -14,11 +14,13 @@ class OpenAIChatHandler:
         self,
         api_key: str | None,
         model: str,
+        search_allowed_domains: list[str] | None = None,
         timeout_seconds: float = 30.0,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
+        self._search_allowed_domains = search_allowed_domains or []
         self._timeout_seconds = timeout_seconds
         self._client = client
 
@@ -88,10 +90,34 @@ class OpenAIChatHandler:
             }
         )
 
-        return {
+        developer_instruction = (
+            "あなたは住宅・リフォーム業向けサイト用のAIチャットボットです。"
+            " 丁寧な日本語で簡潔に回答してください。"
+            " 不明なことは推測せず、確認が必要だと伝えてください。"
+        )
+        if self._search_allowed_domains:
+            developer_instruction += (
+                " 回答前にWeb検索ツールで対象サイトを確認し、"
+                f" 次のドメインのみを根拠にしてください: {', '.join(self._search_allowed_domains)}"
+            )
+
+        payload: dict[str, Any] = {
             "model": self._model,
             "input": input_messages,
+            "tools": [
+                {
+                    "type": "web_search",
+                    "filters": {
+                        "allowed_domains": self._search_allowed_domains,
+                    },
+                    "search_context_size": "medium",
+                }
+            ],
+            "tool_choice": "auto",
+            "include": ["web_search_call.action.sources"],
         }
+        input_messages[0]["content"][0]["text"] = developer_instruction
+        return payload
 
     async def _request_answer(
         self,

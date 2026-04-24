@@ -6,6 +6,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from site_llm_bot.config import Settings
@@ -13,6 +14,7 @@ from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import InMemorySessionStore
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+STATIC_DIR = BASE_DIR / "static"
 
 
 class ChatRequest(BaseModel):
@@ -41,6 +43,7 @@ def create_app(
     chat_handler = OpenAIChatHandler(
         api_key=app_settings.openai_api_key,
         model=app_settings.openai_model,
+        search_allowed_domains=app_settings.search_allowed_domains,
         timeout_seconds=app_settings.openai_timeout_seconds,
         client=openai_client,
     )
@@ -52,10 +55,15 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/")
+    async def index() -> FileResponse:
+        return FileResponse(BASE_DIR / "demo" / "sample_page.html")
 
     @app.get("/demo")
     async def demo_page() -> FileResponse:

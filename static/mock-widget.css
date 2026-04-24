@@ -43,6 +43,7 @@
 }
 
 .mock-chatbot-header {
+  position: relative;
   padding: 18px;
   color: #fff;
   background:
@@ -59,6 +60,20 @@
   margin: 8px 0 0;
   font-size: 12px;
   opacity: 0.92;
+}
+
+.mock-chatbot-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  font: 700 16px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
+  cursor: pointer;
 }
 
 .mock-chatbot-messages {
@@ -119,6 +134,11 @@
   font: 400 12px/1.4 "Hiragino Sans", "Yu Gothic", sans-serif;
 }
 
+.mock-chatbot-status.is-busy {
+  color: var(--widget-primary-strong);
+  font-weight: 700;
+}
+
 .mock-chatbot-form {
   display: flex;
   gap: 8px;
@@ -147,6 +167,13 @@
   background: var(--widget-primary);
   font: 700 14px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
   cursor: pointer;
+}
+
+.mock-chatbot-form textarea:disabled,
+.mock-chatbot-form button:disabled,
+.mock-chatbot-suggestions button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 @media (max-width: 640px) {

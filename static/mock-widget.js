@@ -33,7 +33,8 @@
   panel.innerHTML = `
     <div class="mock-chatbot-header">
       <h2>${escapeHtml(tenantName)} AI相談窓口</h2>
-      <p>工程2の確認用です。現在は仮ウィジェットとしてモック応答を返します。</p>
+      <p>住まいに関するご質問を受け付けています。API未接続時は自動でモック応答に切り替わります。</p>
+      <button class="mock-chatbot-close" type="button" aria-label="閉じる">×</button>
     </div>
     <div class="mock-chatbot-messages"></div>
     <div class="mock-chatbot-suggestions"></div>
@@ -50,12 +51,18 @@
   const messagesEl = panel.querySelector(".mock-chatbot-messages");
   const suggestionsEl = panel.querySelector(".mock-chatbot-suggestions");
   const statusEl = panel.querySelector(".mock-chatbot-status");
+  const closeButton = panel.querySelector(".mock-chatbot-close");
   const form = panel.querySelector(".mock-chatbot-form");
   const textarea = form.querySelector("textarea");
+  const submitButton = form.querySelector("button");
 
   // 初期メッセージは addMessage に集約しておき、
   // 送信時のユーザー発話追加・モック応答追加も同じ導線で処理する。
-  addMessage(messagesEl, "bot", "こんにちは。住まいに関するご質問をお受けします。");
+  addMessage(
+    messagesEl,
+    "bot",
+    "こんにちは。住まいに関するご質問をお受けします。\nまずは施工エリアや相談の流れなど、簡単な内容からお試しください。"
+  );
 
   // 候補質問ボタンは textarea への入力補助のみを担当する。
   // 実送信は form submit に一本化しているため、入力経路が増えても送信処理が分散しない。
@@ -76,6 +83,14 @@
     statusEl.textContent = panel.classList.contains("is-open")
       ? "チャットを表示中"
       : "待機中";
+    if (panel.classList.contains("is-open")) {
+      textarea.focus();
+    }
+  });
+
+  closeButton.addEventListener("click", function () {
+    panel.classList.remove("is-open");
+    setStatus(statusEl, "待機中", false);
   });
 
   // 送信処理の中心。入力値検証、ユーザー発話の描画、状態表示更新のあと、
@@ -89,17 +104,32 @@
 
     textarea.value = "";
     addMessage(messagesEl, "user", text);
-    statusEl.textContent = "APIへ問い合わせ中...";
+    setBusyState(textarea, submitButton, suggestionsEl, true);
+    setStatus(statusEl, "APIへ問い合わせ中...", true);
 
     try {
       const reply = await requestChatAnswer(text);
       sessionId = reply.session_id || sessionId;
       addMessage(messagesEl, "bot", reply.answer);
-      statusEl.textContent =
-        reply.source === "openai" ? "OpenAI応答を受信しました" : "デモ応答を受信しました";
+      setStatus(
+        statusEl,
+        reply.source === "openai" ? "OpenAI応答を受信しました" : "デモ応答を受信しました",
+        false
+      );
     } catch (error) {
       addMessage(messagesEl, "bot", createMockReply(text));
-      statusEl.textContent = "API接続に失敗したためモック応答を表示しました";
+      setStatus(statusEl, "API接続に失敗したためモック応答を表示しました", false);
+    } finally {
+      setBusyState(textarea, submitButton, suggestionsEl, false);
+      textarea.focus();
+    }
+  });
+
+  // Enter だけで送信できるようにし、Shift+Enter は改行に残す。
+  textarea.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
     }
   });
 
@@ -137,6 +167,21 @@
       throw new Error("chat api request failed");
     }
     return response.json();
+  }
+
+  // 送信中の多重送信を防ぎ、入力部品の状態をまとめて切り替える。
+  function setBusyState(textareaEl, submitButtonEl, suggestionsContainer, isBusy) {
+    textareaEl.disabled = isBusy;
+    submitButtonEl.disabled = isBusy;
+    suggestionsContainer.querySelectorAll("button").forEach(function (button) {
+      button.disabled = isBusy;
+    });
+  }
+
+  // ステータス文言と装飾を共通化し、待機中/通信中/完了の表現を揃える。
+  function setStatus(statusElement, text, isBusy) {
+    statusElement.textContent = text;
+    statusElement.classList.toggle("is-busy", isBusy);
   }
 
   // メッセージ描画の共通関数。

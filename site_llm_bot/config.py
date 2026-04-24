@@ -31,6 +31,7 @@ class Settings:
     session_ttl_seconds: int
     max_history_messages: int
     allowed_origins: list[str]
+    search_allowed_domains: list[str]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -48,6 +49,9 @@ class Settings:
                     "ALLOWED_ORIGINS",
                     "http://127.0.0.1:8000,http://localhost:8000,null",
                 )
+            ),
+            search_allowed_domains=parse_csv_env(
+                os.getenv("SEARCH_ALLOWED_DOMAINS", "shintairiku.jp")
             ),
         )
 
