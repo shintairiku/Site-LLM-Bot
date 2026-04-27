@@ -38,6 +38,18 @@ AIチャットボット MVP 開発進捗
 - `shintairiku.jp` を `allowed_domains` に設定し、回答前に対象サイトを検索対象にする形へ変更
 - OpenAI 実疎通は未実施だが、送信 payload にドメイン制限付き Web Search 設定が入ることをテストで確認
 
+7. テナント設定の外だし
+- `config/tenants.json` を追加し、サンプルテナント設定をコード外へ移動
+- `site_llm_bot/config.py` でテナント設定ファイルを読み込む構成へ変更
+- `/api/chat` は `tenant_id` ごとに許可Origin・検索対象ドメインを参照するように変更
+- sample page と widget から `tenant_id` を送る構成に調整
+
+8. デプロイ準備
+- `requirements.txt`、`Dockerfile`、`.dockerignore` を追加
+- Vercel 用のルート `app.py` と `vercel.json` を追加
+- `public/static/*` を追加し、Vercel の静的配信に対応
+- `docs/デプロイ.md` に Vercel / Cloud Run の手順を整理
+
 補足
 - `docs/サーバー設計.md` を追加
 - 自社サーバー運用、CDN配布、テナント認証、Origin検証、将来のRedis移行を前提に整理

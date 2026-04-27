@@ -1,0 +1,24 @@
+{
+  "default_tenant_id": "sample-shintairiku",
+  "tenants": [
+    {
+      "tenant_id": "sample-shintairiku",
+      "display_name": "サンプル工務店",
+      "primary_color": "#155e75",
+      "greeting": "こんにちは。住まいに関するご質問をお受けします。",
+      "suggested_questions": [
+        "施工エリアを教えてください",
+        "相談の流れを知りたいです",
+        "リフォームも対応していますか？"
+      ],
+      "allowed_origins": [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "null"
+      ],
+      "allowed_domains": [
+        "shintairiku.jp"
+      ]
+    }
+  ]
+}

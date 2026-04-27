@@ -12,7 +12,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from site_llm_bot.api.app import create_app
-from site_llm_bot.config import Settings
+from site_llm_bot.config import Settings, TenantConfig
 
 
 @pytest.fixture
@@ -21,6 +21,15 @@ def anyio_backend() -> str:
 
 
 def build_settings(api_key: str | None = "test-key") -> Settings:
+    tenant = TenantConfig(
+        tenant_id="sample-shintairiku",
+        display_name="サンプル工務店",
+        primary_color="#155e75",
+        greeting="こんにちは。",
+        suggested_questions=["施工エリアを教えてください"],
+        allowed_origins=["http://localhost:8000"],
+        allowed_domains=["shintairiku.jp"],
+    )
     return Settings(
         openai_api_key=api_key,
         openai_model="gpt-4o-mini",
@@ -29,8 +38,10 @@ def build_settings(api_key: str | None = "test-key") -> Settings:
         openai_timeout_seconds=30.0,
         session_ttl_seconds=1800,
         max_history_messages=6,
+        tenant_config_path="config/tenants.json",
+        default_tenant_id=tenant.tenant_id,
+        tenants={tenant.tenant_id: tenant},
         allowed_origins=["http://localhost:8000"],
-        search_allowed_domains=["shintairiku.jp"],
     )
 
 
@@ -71,6 +82,7 @@ async def test_chat_api_with_mock_openai() -> None:
             "/api/chat",
             headers={"Origin": "http://localhost:8000"},
             json={
+                "tenant_id": "sample-shintairiku",
                 "message": "施工エリアを教えてください",
                 "page_url": "http://localhost/demo",
             },
@@ -158,6 +170,23 @@ async def test_chat_api_rejects_invalid_origin() -> None:
         )
 
     assert response.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_chat_api_rejects_unknown_tenant() -> None:
+    app = create_app(settings=build_settings())
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            headers={"Origin": "http://localhost:8000"},
+            json={"tenant_id": "unknown-tenant", "message": "相談したいです"},
+        )
+
+    assert response.status_code == 404
 
 
 def test_demo_and_static_routes_exist() -> None:

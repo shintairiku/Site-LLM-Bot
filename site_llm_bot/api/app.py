@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from site_llm_bot.config import Settings
+from site_llm_bot.config import Settings, TenantConfig
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import InMemorySessionStore
 
@@ -20,6 +20,7 @@ STATIC_DIR = BASE_DIR / "static"
 class ChatRequest(BaseModel):
     """ウィジェットから受け取る最小入力。"""
 
+    tenant_id: str | None = None
     message: str = Field(..., min_length=1)
     page_url: str | None = None
     session_id: str | None = None
@@ -40,13 +41,6 @@ def create_app(
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
     session_store = InMemorySessionStore(ttl_seconds=app_settings.session_ttl_seconds)
-    chat_handler = OpenAIChatHandler(
-        api_key=app_settings.openai_api_key,
-        model=app_settings.openai_model,
-        search_allowed_domains=app_settings.search_allowed_domains,
-        timeout_seconds=app_settings.openai_timeout_seconds,
-        client=openai_client,
-    )
 
     app = FastAPI(title="Site LLM Bot API", version="0.1.0")
     app.add_middleware(
@@ -75,7 +69,8 @@ def create_app(
         origin: str | None = Header(default=None, alias="Origin"),
     ) -> ChatResponse:
         """ウィジェット -> API -> OpenAI の導線に、履歴と検証を追加した版。"""
-        if origin and origin not in app_settings.allowed_origins:
+        tenant = resolve_tenant(app_settings, request.tenant_id)
+        if origin and origin not in tenant.allowed_origins:
             raise HTTPException(status_code=403, detail="origin not allowed")
 
         message = request.message.strip()
@@ -88,6 +83,13 @@ def create_app(
             limit=app_settings.max_history_messages,
         )
         session_store.append_message(session.session_id, "user", message)
+        chat_handler = OpenAIChatHandler(
+            api_key=app_settings.openai_api_key,
+            model=app_settings.openai_model,
+            search_allowed_domains=tenant.allowed_domains,
+            timeout_seconds=app_settings.openai_timeout_seconds,
+            client=openai_client,
+        )
 
         try:
             result = await chat_handler.generate_answer(
@@ -106,3 +108,12 @@ def create_app(
         return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
     return app
+
+
+def resolve_tenant(settings: Settings, tenant_id: str | None) -> TenantConfig:
+    """リクエストに対応するテナント設定を返す。"""
+    resolved_tenant_id = tenant_id or settings.default_tenant_id
+    tenant = settings.tenants.get(resolved_tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="tenant not found")
+    return tenant
