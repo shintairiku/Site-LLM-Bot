@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -107,6 +108,8 @@ class OpenAIChatHandler:
             "あなたは住宅・リフォーム業向けサイト用のAIチャットボットです。"
             " 丁寧な日本語で簡潔に回答してください。"
             " 不明なことは推測せず、確認が必要だと伝えてください。"
+            " Markdown記法の強調（**や__）は使わないでください。"
+            " 回答本文にURLや参照元ドメイン名、括弧付きの出典表記は含めないでください。"
         )
         if self._search_allowed_domains:
             developer_instruction += (
@@ -176,13 +179,25 @@ class OpenAIChatHandler:
     # 参照元に許可ドメインが含まれない場合は、通常回答をそのまま返さず安全側へ倒す。
     def _finalize_answer(self, answer: str, used_allowed_sources: bool) -> str:
         if not self._search_allowed_domains:
-            return answer
+            return self._sanitize_answer(answer)
         if used_allowed_sources:
-            return answer
+            return self._sanitize_answer(answer)
         return (
             "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
             " この内容はサイト内で裏取りできなかったため、正確な案内のためにお問い合わせください。"
         )
+
+    # UI側で読みやすいよう、Markdown強調やURL・出典表記を落としてプレーンテキストへ寄せる。
+    def _sanitize_answer(self, answer: str) -> str:
+        sanitized = answer
+        sanitized = re.sub(r"\*\*(.*?)\*\*", r"\1", sanitized)
+        sanitized = re.sub(r"__(.*?)__", r"\1", sanitized)
+        sanitized = re.sub(r"\[(.*?)\]\((https?://.*?)\)", r"\1", sanitized)
+        sanitized = re.sub(r"\(?https?://[^\s)]+\)?", "", sanitized)
+        sanitized = re.sub(r"\(\s*[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^\)]*\)", "", sanitized)
+        sanitized = re.sub(r"[ \t]+", " ", sanitized)
+        sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+        return sanitized.strip()
 
     # OpenAIのweb_search結果に含まれる source URL を見て、許可ドメインの情報が使われたか判定する。
     def _has_allowed_domain_sources(self, data: dict[str, Any]) -> bool:

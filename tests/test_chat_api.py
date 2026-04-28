@@ -119,6 +119,26 @@ def test_openai_handler_formats_assistant_history_as_output_text() -> None:
     assert payload["input"][2]["content"][0]["type"] == "output_text"
 
 
+def test_openai_handler_sanitizes_markdown_and_source_links() -> None:
+    handler = OpenAIChatHandler(
+        api_key="test-key",
+        model="gpt-5.4-mini",
+        search_allowed_domains=["shintairiku.jp"],
+    )
+
+    answer = (
+        "株式会社新大陸は、**SNS・ホームページ・Web広告**を組み合わせた支援会社です。 "
+        "([shintairiku.jp](https://shintairiku.jp/company/?utm_source=openai))"
+    )
+
+    sanitized = handler._sanitize_answer(answer)
+
+    assert "**" not in sanitized
+    assert "https://shintairiku.jp" not in sanitized
+    assert "shintairiku.jp" not in sanitized
+    assert "SNS・ホームページ・Web広告" in sanitized
+
+
 @pytest.mark.anyio
 async def test_chat_api_returns_safe_message_when_allowed_domain_source_is_missing() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
