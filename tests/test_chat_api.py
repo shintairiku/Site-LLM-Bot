@@ -33,7 +33,7 @@ def build_settings(api_key: str | None = "test-key") -> Settings:
     )
     return Settings(
         openai_api_key=api_key,
-        openai_model="gpt-4o-mini",
+        openai_model="gpt-5.4-mini",
         app_host="127.0.0.1",
         app_port=8000,
         openai_timeout_seconds=30.0,

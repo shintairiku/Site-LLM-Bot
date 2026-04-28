@@ -45,7 +45,7 @@ class Settings:
         tenant_settings = load_tenant_settings(tenant_config_path)
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
             app_host=os.getenv("APP_HOST", "127.0.0.1"),
             app_port=int(os.getenv("APP_PORT", "8000")),
             openai_timeout_seconds=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
