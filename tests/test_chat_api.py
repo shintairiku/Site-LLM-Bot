@@ -13,6 +13,8 @@ if str(ROOT_DIR) not in sys.path:
 
 from site_llm_bot.api.app import create_app
 from site_llm_bot.config import Settings, TenantConfig
+from site_llm_bot.services.session_store import ChatMessage
+from site_llm_bot.services.openai_handler import OpenAIChatHandler
 
 
 @pytest.fixture
@@ -95,6 +97,26 @@ async def test_chat_api_with_mock_openai() -> None:
     assert "施工エリア" in response.json()["answer"]
     assert response.json()["session_id"]
     await openai_client.aclose()
+
+
+def test_openai_handler_formats_assistant_history_as_output_text() -> None:
+    handler = OpenAIChatHandler(
+        api_key="test-key",
+        model="gpt-5.4-mini",
+        search_allowed_domains=["shintairiku.jp"],
+    )
+
+    payload = handler._build_payload(
+        message="次の質問です",
+        page_url=None,
+        history=[
+            ChatMessage(role="user", content="最初の質問です"),
+            ChatMessage(role="assistant", content="最初の回答です"),
+        ],
+    )
+
+    assert payload["input"][1]["content"][0]["type"] == "input_text"
+    assert payload["input"][2]["content"][0]["type"] == "output_text"
 
 
 @pytest.mark.anyio

@@ -92,7 +92,7 @@ class OpenAIChatHandler:
             input_messages.append(
                 {
                     "role": item.role,
-                    "content": [{"type": "input_text", "text": item.content}],
+                    "content": [self._build_history_content(item.role, item.content)],
                 }
             )
 
@@ -131,6 +131,12 @@ class OpenAIChatHandler:
         }
         input_messages[0]["content"][0]["text"] = developer_instruction
         return payload
+
+    def _build_history_content(self, role: str, content: str) -> dict[str, str]:
+        """Responses API の role ごとの content 形式に合わせて履歴を整形する。"""
+        if role == "assistant":
+            return {"type": "output_text", "text": content}
+        return {"type": "input_text", "text": content}
 
     async def _request_answer(
         self,
