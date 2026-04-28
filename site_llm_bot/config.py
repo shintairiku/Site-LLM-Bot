@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,6 +36,7 @@ class Settings:
     default_tenant_id: str
     tenants: dict[str, "TenantConfig"] = field(default_factory=dict)
     allowed_origins: list[str] = field(default_factory=list)
+    allowed_origin_regex: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -53,6 +55,7 @@ class Settings:
             default_tenant_id=tenant_settings.default_tenant_id,
             tenants=tenant_settings.tenants,
             allowed_origins=collect_allowed_origins(tenant_settings.tenants),
+            allowed_origin_regex=build_allowed_origin_regex(tenant_settings.tenants),
         )
 
 
@@ -66,7 +69,14 @@ class TenantConfig:
     greeting: str
     suggested_questions: list[str]
     allowed_origins: list[str]
+    allowed_origin_patterns: list[str]
     allowed_domains: list[str]
+
+    def is_origin_allowed(self, origin: str) -> bool:
+        """固定 Origin または正規表現パターンで許可判定する。"""
+        if origin in self.allowed_origins:
+            return True
+        return any(re.fullmatch(pattern, origin) for pattern in self.allowed_origin_patterns)
 
 
 @dataclass(slots=True)
@@ -94,6 +104,7 @@ def load_tenant_settings(path: str) -> TenantSettings:
             greeting=item["greeting"],
             suggested_questions=item.get("suggested_questions", []),
             allowed_origins=item.get("allowed_origins", []),
+            allowed_origin_patterns=item.get("allowed_origin_patterns", []),
             allowed_domains=item.get("allowed_domains", []),
         )
         tenants[tenant.tenant_id] = tenant
@@ -109,3 +120,15 @@ def collect_allowed_origins(tenants: dict[str, TenantConfig]) -> list[str]:
             if origin not in origins:
                 origins.append(origin)
     return origins
+
+
+def build_allowed_origin_regex(tenants: dict[str, TenantConfig]) -> str | None:
+    """CORS ミドルウェア用に全テナントの Origin regex を結合する。"""
+    patterns: list[str] = []
+    for tenant in tenants.values():
+        for pattern in tenant.allowed_origin_patterns:
+            if pattern not in patterns:
+                patterns.append(pattern)
+    if not patterns:
+        return None
+    return "|".join(f"(?:{pattern})" for pattern in patterns)

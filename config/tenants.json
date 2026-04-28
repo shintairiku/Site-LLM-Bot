@@ -14,9 +14,12 @@
       "allowed_origins": [
         "http://127.0.0.1:8000",
         "http://localhost:8000",
-        "https://site-llm-bot.vercel.app/",
+        "https://site-llm-bot.vercel.app",
         "https://site-llm-bot-742231208085.asia-northeast1.run.app",
         "null"
+      ],
+      "allowed_origin_patterns": [
+        "https://site-llm-[a-z0-9]+-marketing-automation\\.vercel\\.app"
       ],
       "allowed_domains": [
         "shintairiku.jp"

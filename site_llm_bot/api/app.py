@@ -46,6 +46,7 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.allowed_origins,
+        allow_origin_regex=app_settings.allowed_origin_regex,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -70,7 +71,7 @@ def create_app(
     ) -> ChatResponse:
         """ウィジェット -> API -> OpenAI の導線に、履歴と検証を追加した版。"""
         tenant = resolve_tenant(app_settings, request.tenant_id)
-        if origin and origin not in tenant.allowed_origins:
+        if origin and not tenant.is_origin_allowed(origin):
             raise HTTPException(status_code=403, detail="origin not allowed")
 
         message = request.message.strip()

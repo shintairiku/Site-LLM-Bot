@@ -28,6 +28,7 @@ def build_settings(api_key: str | None = "test-key") -> Settings:
         greeting="こんにちは。",
         suggested_questions=["施工エリアを教えてください"],
         allowed_origins=["http://localhost:8000"],
+        allowed_origin_patterns=[r"https://site-llm-[a-z0-9]+-marketing-automation\.vercel\.app"],
         allowed_domains=["shintairiku.jp"],
     )
     return Settings(
@@ -42,6 +43,7 @@ def build_settings(api_key: str | None = "test-key") -> Settings:
         default_tenant_id=tenant.tenant_id,
         tenants={tenant.tenant_id: tenant},
         allowed_origins=["http://localhost:8000"],
+        allowed_origin_regex=r"(?:https://site-llm-[a-z0-9]+-marketing-automation\.vercel\.app)",
     )
 
 
@@ -170,6 +172,47 @@ async def test_chat_api_rejects_invalid_origin() -> None:
         )
 
     assert response.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_chat_api_allows_origin_by_pattern() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            headers={"Origin": "https://site-llm-foqkxam12-marketing-automation.vercel.app"},
+            json={"message": "相談したいです"},
+        )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_chat_api_preflight_allows_origin_by_pattern() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.options(
+            "/api/chat",
+            headers={
+                "Origin": "https://site-llm-foqkxam12-marketing-automation.vercel.app",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert (
+        response.headers["access-control-allow-origin"]
+        == "https://site-llm-foqkxam12-marketing-automation.vercel.app"
+    )
 
 
 @pytest.mark.anyio
