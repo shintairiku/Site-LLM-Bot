@@ -8,7 +8,8 @@
   // この値は下の render 相当の処理と、テーマ反映、モック応答表示で参照される。
   const baseUrl = new URL("./", script.src || window.location.href);
   const cssUrl = new URL("mock-widget.css", baseUrl).toString();
-  const apiBase = script.dataset.apiBase || "http://127.0.0.1:8000";
+  const apiBase =
+    script.dataset.apiBase || "https://site-llm-bot-742231208085.asia-northeast1.run.app";
   const tenantId = script.dataset.tenantId || "sample-shintairiku";
   const tenantName = script.dataset.tenantName || "サンプル工務店";
   const accent = script.dataset.color || "#155e75";

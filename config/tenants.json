@@ -14,6 +14,8 @@
       "allowed_origins": [
         "http://127.0.0.1:8000",
         "http://localhost:8000",
+        "https://site-llm-rkhxjn6ty-marketing-automation.vercel.app",
+        "https://site-llm-bot-742231208085.asia-northeast1.run.app",
         "null"
       ],
       "allowed_domains": [

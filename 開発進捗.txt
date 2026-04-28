@@ -1,5 +1,5 @@
 AIチャットボット MVP 開発進捗
-更新日: 2026-04-24
+更新日: 2026-04-27
 
 現在の進行範囲
 - 工程5「ウィジェットのブラッシュアップ」まで対応
@@ -49,6 +49,10 @@ AIチャットボット MVP 開発進捗
 - Vercel 用のルート `app.py` と `vercel.json` を追加
 - `public/static/*` を追加し、Vercel の静的配信に対応
 - `docs/デプロイ.md` に Vercel / Cloud Run の手順を整理
+
+9. デプロイ先反映
+- Vercel 確認用ドメインと Cloud Run ドメインを `allowed_origins` に追加
+- sample page と widget の API 接続先既定値を Cloud Run へ変更
 
 補足
 - `docs/サーバー設計.md` を追加
