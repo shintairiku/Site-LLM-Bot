@@ -1,8 +1,8 @@
 {
-  "default_tenant_id": "sample-shintairiku",
+  "default_tenant_id": "development",
   "tenants": [
     {
-      "tenant_id": "sample-shintairiku",
+      "tenant_id": "development",
       "display_name": "サンプル工務店",
       "primary_color": "#155e75",
       "greeting": "こんにちは。住まいに関するご質問をお受けします。",

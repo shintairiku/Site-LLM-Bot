@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,8 +45,7 @@ def create_app(
     app = FastAPI(title="Site LLM Bot API", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=app_settings.allowed_origins,
-        allow_origin_regex=app_settings.allowed_origin_regex,
+        allow_origins=["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -65,14 +64,11 @@ def create_app(
         return FileResponse(BASE_DIR / "demo" / "sample_page.html")
 
     @app.post("/api/chat", response_model=ChatResponse)
-    async def chat(
-        request: ChatRequest,
-        origin: str | None = Header(default=None, alias="Origin"),
-    ) -> ChatResponse:
-        """ウィジェット -> API -> OpenAI の導線に、履歴と検証を追加した版。"""
+    async def chat(request: ChatRequest) -> ChatResponse:
+        """ウィジェット -> API -> OpenAI の導線。tenant_id ごとに検索対象を切り替える。"""
         tenant = resolve_tenant(app_settings, request.tenant_id)
-        if origin and not tenant.is_origin_allowed(origin):
-            raise HTTPException(status_code=403, detail="origin not allowed")
+        if not tenant.allowed_domains:
+            raise HTTPException(status_code=403, detail="allowed domains not configured")
 
         message = request.message.strip()
         if not message:
