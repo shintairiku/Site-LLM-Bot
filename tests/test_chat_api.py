@@ -12,7 +12,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from site_llm_bot.api.app import create_app
-from site_llm_bot.config import Settings, TenantConfig
+from site_llm_bot.config import Settings, TenantConfig, load_tenant_settings
 from site_llm_bot.services.session_store import ChatMessage
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 
@@ -47,6 +47,16 @@ def build_settings(api_key: str | None = "test-key") -> Settings:
         allowed_origins=["http://localhost:8000"],
         allowed_origin_regex=r"(?:https://site-llm-[a-z0-9]+-marketing-automation\.vercel\.app)",
     )
+
+
+def test_default_tenant_allows_target_sites() -> None:
+    tenant_settings = load_tenant_settings("config/tenants.json")
+    tenant = tenant_settings.tenants[tenant_settings.default_tenant_id]
+
+    assert "https://www.moreliving.co.jp" in tenant.allowed_origins
+    assert "https://www.reform-tamao.com" in tenant.allowed_origins
+    assert "moreliving.co.jp" in tenant.allowed_domains
+    assert "reform-tamao.com" in tenant.allowed_domains
 
 
 @pytest.mark.anyio

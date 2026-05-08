@@ -110,6 +110,7 @@ class OpenAIChatHandler:
             " 不明なことは推測せず、確認が必要だと伝えてください。"
             " Markdown記法の強調（**や__）は使わないでください。"
             " 回答本文にURLや参照元ドメイン名、括弧付きの出典表記は含めないでください。"
+            " 関連度が高いイベントページのリンクを最後に案内するようにしてください。"
         )
         if self._search_allowed_domains:
             developer_instruction += (
@@ -127,9 +128,11 @@ class OpenAIChatHandler:
                         "allowed_domains": self._search_allowed_domains,
                     },
                     "search_context_size": "medium",
+
                 }
             ],
-            "tool_choice": "auto",
+            # "tool_choice": "auto",
+            "tool_choice": "required",
             "include": ["web_search_call.action.sources"],
         }
         input_messages[0]["content"][0]["text"] = developer_instruction
