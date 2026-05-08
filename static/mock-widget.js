@@ -193,10 +193,42 @@
   function addMessage(container, role, text) {
     const node = document.createElement("div");
     node.className = `mock-chatbot-message ${role}`;
-    node.textContent = text;
+    appendLinkedText(node, text);
     container.appendChild(node);
     container.scrollTop = container.scrollHeight;
     return node;
+  }
+
+  // 回答内のURLだけをアンカー化する。本文はtext nodeで追加し、HTMLとして解釈しない。
+  function appendLinkedText(node, text) {
+    const value = String(text);
+    const urlPattern = /https?:\/\/[^\s<>"']+/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = urlPattern.exec(value)) !== null) {
+      if (match.index > lastIndex) {
+        node.appendChild(document.createTextNode(value.slice(lastIndex, match.index)));
+      }
+
+      const rawUrl = match[0];
+      const url = rawUrl.replace(/[.,)]+$/, "");
+      const trailingText = rawUrl.slice(url.length);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.textContent = url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      node.appendChild(anchor);
+      if (trailingText) {
+        node.appendChild(document.createTextNode(trailingText));
+      }
+      lastIndex = match.index + rawUrl.length;
+    }
+
+    if (lastIndex < value.length) {
+      node.appendChild(document.createTextNode(value.slice(lastIndex)));
+    }
   }
 
   // CSS の重複読み込みを避けつつ、script 設置だけでウィジェットを自己完結させるための関数。

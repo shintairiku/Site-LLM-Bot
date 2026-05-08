@@ -9,6 +9,8 @@ import httpx
 
 from site_llm_bot.services.session_store import ChatMessage
 
+MAX_RELATED_LINKS = 3
+
 
 @dataclass(slots=True)
 class ChatGenerationResult:
@@ -110,7 +112,7 @@ class OpenAIChatHandler:
             " 不明なことは推測せず、確認が必要だと伝えてください。"
             " Markdown記法の強調（**や__）は使わないでください。"
             " 回答本文にURLや参照元ドメイン名、括弧付きの出典表記は含めないでください。"
-            " 関連度が高いイベントページのURLリンクを最後に案内するようにしてください。"
+            " 関連リンクはシステム側で追加するため、回答本文には含めないでください。"
         )
         if self._search_allowed_domains:
             developer_instruction += (
@@ -158,11 +160,12 @@ class OpenAIChatHandler:
         )
         response.raise_for_status()
         data = response.json()
-        used_allowed_sources = self._has_allowed_domain_sources(data)
+        related_links = self._extract_allowed_source_urls(data)
+        used_allowed_sources = bool(related_links) if self._search_allowed_domains else True
         answer = data.get("output_text")
         if isinstance(answer, str) and answer.strip():
             return ChatGenerationResult(
-                answer=self._finalize_answer(answer.strip(), used_allowed_sources),
+                answer=self._finalize_answer(answer.strip(), used_allowed_sources, related_links),
                 used_allowed_sources=used_allowed_sources,
             )
 
@@ -175,16 +178,21 @@ class OpenAIChatHandler:
                     texts.append(text)
         merged = "\n".join(texts).strip() or "回答を生成できませんでした。"
         return ChatGenerationResult(
-            answer=self._finalize_answer(merged, used_allowed_sources),
+            answer=self._finalize_answer(merged, used_allowed_sources, related_links),
             used_allowed_sources=used_allowed_sources,
         )
 
     # 参照元に許可ドメインが含まれない場合は、通常回答をそのまま返さず安全側へ倒す。
-    def _finalize_answer(self, answer: str, used_allowed_sources: bool) -> str:
+    def _finalize_answer(
+        self,
+        answer: str,
+        used_allowed_sources: bool,
+        related_links: list[str] | None = None,
+    ) -> str:
         if not self._search_allowed_domains:
             return self._sanitize_answer(answer)
         if used_allowed_sources:
-            return self._sanitize_answer(answer)
+            return self._append_related_links(self._sanitize_answer(answer), related_links or [])
         return (
             "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
             " この内容はサイト内で裏取りできなかったため、正確な案内のためにお問い合わせください。"
@@ -202,17 +210,41 @@ class OpenAIChatHandler:
         sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
         return sanitized.strip()
 
-    # OpenAIのweb_search結果に含まれる source URL を見て、許可ドメインの情報が使われたか判定する。
-    def _has_allowed_domain_sources(self, data: dict[str, Any]) -> bool:
+    def _append_related_links(self, answer: str, related_links: list[str]) -> str:
+        if not related_links:
+            return answer
+
+        body = re.sub(r"\n*関連リンク[:：]\s*$", "", answer).strip()
+        links = "\n".join(f"- {url}" for url in related_links[:MAX_RELATED_LINKS])
+        return f"{body}\n\n関連リンク:\n{links}"
+
+    # OpenAIのweb_search結果に含まれる source URL から、許可ドメインのリンクだけを抽出する。
+    def _extract_allowed_source_urls(self, data: dict[str, Any]) -> list[str]:
         allowed = [domain.lower() for domain in self._search_allowed_domains]
-        if not allowed:
-            return True
+        urls: list[str] = []
 
         for item in data.get("output", []):
             action = item.get("action") or {}
             for source in action.get("sources", []):
-                url = source.get("url", "")
-                host = urlparse(url).netloc.lower()
-                if any(host == domain or host.endswith(f".{domain}") for domain in allowed):
-                    return True
-        return False
+                url = self._normalize_allowed_source_url(source.get("url", ""), allowed)
+                if url and url not in urls:
+                    urls.append(url)
+                    if len(urls) >= MAX_RELATED_LINKS:
+                        return urls
+        return urls
+
+    def _normalize_allowed_source_url(self, url: Any, allowed_domains: list[str]) -> str | None:
+        if not isinstance(url, str) or not url:
+            return None
+
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
+
+        host = parsed.netloc.lower()
+        if allowed_domains and not any(
+            host == domain or host.endswith(f".{domain}") for domain in allowed_domains
+        ):
+            return None
+
+        return parsed._replace(fragment="").geturl()

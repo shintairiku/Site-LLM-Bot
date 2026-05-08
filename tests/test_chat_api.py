@@ -105,6 +105,8 @@ async def test_chat_api_with_mock_openai() -> None:
     assert response.status_code == 200
     assert response.json()["source"] == "openai"
     assert "施工エリア" in response.json()["answer"]
+    assert "関連リンク:" in response.json()["answer"]
+    assert "https://shintairiku.jp/company/" in response.json()["answer"]
     assert response.json()["session_id"]
     await openai_client.aclose()
 
@@ -147,6 +149,36 @@ def test_openai_handler_sanitizes_markdown_and_source_links() -> None:
     assert "https://shintairiku.jp" not in sanitized
     assert "shintairiku.jp" not in sanitized
     assert "SNS・ホームページ・Web広告" in sanitized
+
+
+def test_openai_handler_appends_related_links_from_allowed_sources() -> None:
+    handler = OpenAIChatHandler(
+        api_key="test-key",
+        model="gpt-5.4-mini",
+        search_allowed_domains=["shintairiku.jp"],
+    )
+
+    data = {
+        "output": [
+            {
+                "type": "web_search_call",
+                "action": {
+                    "sources": [
+                        {"url": "https://example.com/article"},
+                        {"url": "https://www.shintairiku.jp/event/#detail"},
+                        {"url": "https://www.shintairiku.jp/event/"},
+                    ]
+                },
+            }
+        ],
+    }
+
+    related_links = handler._extract_allowed_source_urls(data)
+    answer = handler._finalize_answer("イベント情報をご案内します。", True, related_links)
+
+    assert related_links == ["https://www.shintairiku.jp/event/"]
+    assert answer.endswith("関連リンク:\n- https://www.shintairiku.jp/event/")
+    assert "https://example.com/article" not in answer
 
 
 @pytest.mark.anyio

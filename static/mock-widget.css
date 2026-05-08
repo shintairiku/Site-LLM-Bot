@@ -108,6 +108,13 @@
   border-bottom-left-radius: 6px;
 }
 
+.mock-chatbot-message a {
+  color: var(--widget-primary);
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .mock-chatbot-suggestions {
   display: flex;
   gap: 8px;
