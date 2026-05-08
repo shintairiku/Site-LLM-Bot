@@ -60,6 +60,14 @@ def test_default_tenant_uses_configured_allowed_domains() -> None:
     assert tenant.allowed_domains == ["shintairiku.jp"]
 
 
+def test_demo_tenants_use_single_allowed_domain() -> None:
+    tenant_settings = load_tenant_settings("config/tenants.json")
+
+    assert tenant_settings.tenants["sample-shintairiku"].allowed_domains == ["shintairiku.jp"]
+    assert tenant_settings.tenants["reform-tamao"].allowed_domains == ["reform-tamao.com"]
+    assert tenant_settings.tenants["more-living"].allowed_domains == ["moreliving.co.jp"]
+
+
 @pytest.mark.anyio
 async def test_chat_api_with_mock_openai() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
