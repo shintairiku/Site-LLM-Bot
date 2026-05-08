@@ -56,6 +56,47 @@
         backdrop-filter: blur(8px);
         box-shadow: 0 16px 48px rgba(16, 33, 43, 0.06);
       }
+
+      .dev-tenant-switcher {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: 12px 16px;
+        max-width: 720px;
+        margin-top: 28px;
+        padding: 16px;
+        border: 1px solid #dce6ea;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.9);
+      }
+
+      .dev-tenant-switcher label {
+        display: block;
+        margin-bottom: 6px;
+        color: #43535c;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .dev-tenant-switcher select {
+        min-width: 220px;
+        border: 1px solid #cbd8dd;
+        border-radius: 8px;
+        padding: 10px 12px;
+        color: #10212b;
+        background: #fff;
+        font: 700 14px/1.4 "Hiragino Sans", "Yu Gothic", sans-serif;
+      }
+
+      .dev-tenant-domain {
+        margin: 0;
+        color: #43535c;
+        font-size: 13px;
+      }
+
+      .dev-tenant-domain strong {
+        color: #10212b;
+      }
     </style>
   </head>
   <body>
@@ -67,6 +108,40 @@
         サンプルホームページです。次工程でウィジェット埋め込みテストを行う前提で、
         ヒーロー領域と主要導線の見え方を先に整えています。
       </p>
+      <section class="dev-tenant-switcher" aria-label="開発用テナント切り替え">
+        <div>
+          <label for="dev-tenant-select">Web検索対象</label>
+          <select id="dev-tenant-select">
+            <option
+              value="sample-shintairiku"
+              data-tenant-name="新大陸"
+              data-color="#155e75"
+              data-domain="shintairiku.jp"
+            >
+              新大陸
+            </option>
+            <option
+              value="reform-tamao"
+              data-tenant-name="リフォームのタマオ"
+              data-color="#b45309"
+              data-domain="reform-tamao.com"
+            >
+              リフォームのタマオ
+            </option>
+            <option
+              value="more-living"
+              data-tenant-name="MORE Living"
+              data-color="#047857"
+              data-domain="moreliving.co.jp"
+            >
+              MORE Living
+            </option>
+          </select>
+        </div>
+        <p class="dev-tenant-domain">
+          allowed_domains: <strong id="dev-tenant-domain">shintairiku.jp</strong>
+        </p>
+      </section>
       <section class="cards">
         <article class="card">
           <h2>新築相談</h2>
@@ -83,11 +158,40 @@
       </section>
     </main>
     <script
+      id="site-llm-bot-widget"
       src="../static/mock-widget.js"
-      data-tenant-id="development"
-      data-tenant-name="サンプル工務店"
+      data-tenant-id="sample-shintairiku"
+      data-tenant-name="新大陸"
       data-color="#155e75"
       data-api-base="https://site-llm-bot-742231208085.asia-northeast1.run.app"
     ></script>
+    <script>
+      (function () {
+        const select = document.getElementById("dev-tenant-select");
+        const domain = document.getElementById("dev-tenant-domain");
+        const widgetScript = document.getElementById("site-llm-bot-widget");
+
+        if (!select || !domain || !widgetScript) {
+          return;
+        }
+
+        function syncTenant() {
+          const option = select.selectedOptions[0];
+          const detail = {
+            tenantId: option.value,
+            tenantName: option.dataset.tenantName,
+            color: option.dataset.color,
+          };
+
+          widgetScript.dataset.tenantId = detail.tenantId;
+          widgetScript.dataset.tenantName = detail.tenantName;
+          widgetScript.dataset.color = detail.color;
+          domain.textContent = option.dataset.domain;
+          window.dispatchEvent(new CustomEvent("site-llm-bot:tenant-change", { detail }));
+        }
+
+        select.addEventListener("change", syncTenant);
+      })();
+    </script>
   </body>
 </html>
