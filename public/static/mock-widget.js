@@ -8,11 +8,12 @@
   // この値は下の render 相当の処理と、テーマ反映、モック応答表示で参照される。
   const baseUrl = new URL("./", script.src || window.location.href);
   const cssUrl = new URL("mock-widget.css", baseUrl).toString();
-  const apiBase =
-    script.dataset.apiBase || "https://site-llm-bot-742231208085.asia-northeast1.run.app";
-  const tenantId = script.dataset.tenantId || "sample-shintairiku";
-  const tenantName = script.dataset.tenantName || "サンプル工務店";
-  const accent = script.dataset.color || "#155e75";
+  const apiBase = resolveApiBase(
+    script.dataset.apiBase || "https://site-llm-bot-742231208085.asia-northeast1.run.app"
+  );
+  let tenantId = script.dataset.tenantId || "sample-shintairiku";
+  let tenantName = script.dataset.tenantName || "サンプル工務店";
+  let accent = script.dataset.color || "#155e75";
   let sessionId = null;
   const suggestions = [
     "施工エリアを教えてください",
@@ -34,7 +35,7 @@
   panel.className = "mock-chatbot-panel";
   panel.innerHTML = `
     <div class="mock-chatbot-header">
-      <h2>${escapeHtml(tenantName)} AI相談窓口</h2>
+      <h2 class="mock-chatbot-title">${escapeHtml(tenantName)} AI相談窓口</h2>
       <p>住まいに関するご質問を受け付けています。API未接続時は自動でモック応答に切り替わります。</p>
       <button class="mock-chatbot-close" type="button" aria-label="閉じる">×</button>
     </div>
@@ -57,6 +58,7 @@
   const form = panel.querySelector(".mock-chatbot-form");
   const textarea = form.querySelector("textarea");
   const submitButton = form.querySelector("button");
+  const titleEl = panel.querySelector(".mock-chatbot-title");
 
   // 初期メッセージは addMessage に集約しておき、
   // 送信時のユーザー発話追加・モック応答追加も同じ導線で処理する。
@@ -93,6 +95,23 @@
   closeButton.addEventListener("click", function () {
     panel.classList.remove("is-open");
     setStatus(statusEl, "待機中", false);
+  });
+
+  window.addEventListener("site-llm-bot:tenant-change", function (event) {
+    const detail = event.detail || {};
+    if (detail.tenantId) {
+      tenantId = detail.tenantId;
+    }
+    if (detail.tenantName) {
+      tenantName = detail.tenantName;
+      titleEl.textContent = `${tenantName} AI相談窓口`;
+    }
+    if (detail.color) {
+      accent = detail.color;
+      document.documentElement.style.setProperty("--widget-primary", accent);
+    }
+    sessionId = null;
+    setStatus(statusEl, `${tenantName}に切り替えました`, false);
   });
 
   // 送信処理の中心。入力値検証、ユーザー発話の描画、状態表示更新のあと、
@@ -160,7 +179,7 @@
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        tenant_id: tenantId,
+        tenant_id: script.dataset.tenantId || tenantId,
         message: text,
         page_url: window.location.href,
         session_id: sessionId,
@@ -241,6 +260,16 @@
     link.rel = "stylesheet";
     link.href = href;
     document.head.appendChild(link);
+  }
+
+  function resolveApiBase(configuredApiBase) {
+    if (
+      window.location.origin !== "null" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ) {
+      return window.location.origin;
+    }
+    return configuredApiBase;
   }
 
   // パネルのタイトルに tenantName を埋め込むための最低限のエスケープ関数。

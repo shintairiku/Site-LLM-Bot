@@ -1,9 +1,9 @@
 {
-  "default_tenant_id": "development",
+  "default_tenant_id": "sample-shintairiku",
   "tenants": [
     {
-      "tenant_id": "development",
-      "display_name": "サンプル工務店",
+      "tenant_id": "sample-shintairiku",
+      "display_name": "新大陸",
       "primary_color": "#155e75",
       "greeting": "こんにちは。住まいに関するご質問をお受けします。",
       "suggested_questions": [
@@ -24,9 +24,59 @@
         "https://site-llm-[a-z0-9]+-marketing-automation\\.vercel\\.app"
       ],
       "allowed_domains": [
-        "moreliving.co.jp",
-        "reform-tamao.com",
         "shintairiku.jp"
+      ]
+    },
+    {
+      "tenant_id": "reform-tamao",
+      "display_name": "リフォームのタマオ",
+      "primary_color": "#b45309",
+      "greeting": "こんにちは。リフォームに関するご質問をお受けします。",
+      "suggested_questions": [
+        "施工エリアを教えてください",
+        "相談の流れを知りたいです",
+        "水回りのリフォームも対応していますか？"
+      ],
+      "allowed_origins": [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "https://www.moreliving.co.jp",
+        "https://www.reform-tamao.com",
+        "https://site-llm-bot.vercel.app",
+        "https://site-llm-bot-742231208085.asia-northeast1.run.app",
+        "null"
+      ],
+      "allowed_origin_patterns": [
+        "https://site-llm-[a-z0-9]+-marketing-automation\\.vercel\\.app"
+      ],
+      "allowed_domains": [
+        "reform-tamao.com"
+      ]
+    },
+    {
+      "tenant_id": "more-living",
+      "display_name": "MORE Living",
+      "primary_color": "#047857",
+      "greeting": "こんにちは。住まいに関するご質問をお受けします。",
+      "suggested_questions": [
+        "施工エリアを教えてください",
+        "相談の流れを知りたいです",
+        "リフォームも対応していますか？"
+      ],
+      "allowed_origins": [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "https://www.moreliving.co.jp",
+        "https://www.reform-tamao.com",
+        "https://site-llm-bot.vercel.app",
+        "https://site-llm-bot-742231208085.asia-northeast1.run.app",
+        "null"
+      ],
+      "allowed_origin_patterns": [
+        "https://site-llm-[a-z0-9]+-marketing-automation\\.vercel\\.app"
+      ],
+      "allowed_domains": [
+        "moreliving.co.jp"
       ]
     }
   ]
