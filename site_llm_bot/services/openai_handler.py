@@ -12,6 +12,14 @@ from site_llm_bot.services.session_store import ChatMessage
 MAX_RELATED_LINKS = 3
 
 
+@dataclass(frozen=True, slots=True)
+class RelatedLink:
+    """回答末尾に表示する関連リンク。"""
+
+    title: str
+    url: str
+
+
 @dataclass(slots=True)
 class ChatGenerationResult:
     """LLM応答と、その応答が許可ドメインで裏取りできたかをまとめて返す。"""
@@ -160,7 +168,7 @@ class OpenAIChatHandler:
         )
         response.raise_for_status()
         data = response.json()
-        related_links = self._extract_allowed_source_urls(data)
+        related_links = self._extract_allowed_source_links(data)
         used_allowed_sources = bool(related_links) if self._search_allowed_domains else True
         answer = data.get("output_text")
         if isinstance(answer, str) and answer.strip():
@@ -187,7 +195,7 @@ class OpenAIChatHandler:
         self,
         answer: str,
         used_allowed_sources: bool,
-        related_links: list[str] | None = None,
+        related_links: list[RelatedLink] | None = None,
     ) -> str:
         if not self._search_allowed_domains:
             return self._sanitize_answer(answer)
@@ -210,28 +218,48 @@ class OpenAIChatHandler:
         sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
         return sanitized.strip()
 
-    def _append_related_links(self, answer: str, related_links: list[str]) -> str:
+    def _append_related_links(self, answer: str, related_links: list[RelatedLink]) -> str:
         if not related_links:
             return answer
 
         body = re.sub(r"\n*関連リンク[:：]\s*$", "", answer).strip()
-        links = "\n".join(f"- {url}" for url in related_links[:MAX_RELATED_LINKS])
+        links = "\n".join(
+            f"【{link.title}】\n- {link.url}" for link in related_links[:MAX_RELATED_LINKS]
+        )
         return f"{body}\n\n関連リンク:\n{links}"
 
     # OpenAIのweb_search結果に含まれる source URL から、許可ドメインのリンクだけを抽出する。
-    def _extract_allowed_source_urls(self, data: dict[str, Any]) -> list[str]:
+    def _extract_allowed_source_links(self, data: dict[str, Any]) -> list[RelatedLink]:
         allowed = [domain.lower() for domain in self._search_allowed_domains]
-        urls: list[str] = []
+        links: list[RelatedLink] = []
+        seen_urls: set[str] = set()
+
+        for candidate in self._iter_source_candidates(data):
+            url = self._normalize_allowed_source_url(candidate.get("url", ""), allowed)
+            if not url or url in seen_urls:
+                continue
+
+            title = self._normalize_link_title(candidate.get("title"), url)
+            links.append(RelatedLink(title=title, url=url))
+            seen_urls.add(url)
+            if len(links) >= MAX_RELATED_LINKS:
+                return links
+        return links
+
+    def _iter_source_candidates(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+
+        for item in data.get("output", []):
+            for content in item.get("content", []):
+                for annotation in content.get("annotations", []):
+                    if annotation.get("type") == "url_citation":
+                        candidates.append(annotation)
 
         for item in data.get("output", []):
             action = item.get("action") or {}
-            for source in action.get("sources", []):
-                url = self._normalize_allowed_source_url(source.get("url", ""), allowed)
-                if url and url not in urls:
-                    urls.append(url)
-                    if len(urls) >= MAX_RELATED_LINKS:
-                        return urls
-        return urls
+            candidates.extend(action.get("sources", []))
+
+        return candidates
 
     def _normalize_allowed_source_url(self, url: Any, allowed_domains: list[str]) -> str | None:
         if not isinstance(url, str) or not url:
@@ -248,3 +276,46 @@ class OpenAIChatHandler:
             return None
 
         return parsed._replace(fragment="").geturl()
+
+    def _normalize_link_title(self, title: Any, url: str) -> str:
+        if isinstance(title, str):
+            normalized = title.strip()
+            normalized = re.sub(r"\[(.*?)\]\((https?://.*?)\)", r"\1", normalized)
+            normalized = re.sub(r"https?://[^\s)]+", "", normalized)
+            normalized = re.sub(r"\s+", " ", normalized).strip(" -_|｜")
+            if normalized:
+                for separator in ("｜", "|", " - ", " – ", " — "):
+                    if separator in normalized:
+                        normalized = normalized.split(separator, 1)[0].strip()
+                        break
+                return normalized[:40]
+
+        return self._fallback_link_title(url)
+
+    def _fallback_link_title(self, url: str) -> str:
+        parsed = urlparse(url)
+        segments = [
+            segment.removesuffix(".html").removesuffix(".htm").lower()
+            for segment in parsed.path.strip("/").split("/")
+            if segment
+        ]
+
+        segment_titles = {
+            "blog": "ブログ",
+            "case": "施工事例",
+            "company": "会社情報",
+            "contact": "お問い合わせ",
+            "corporate": "コーポレート",
+            "event": "イベント",
+            "faq": "よくある質問",
+            "news": "お知らせ",
+            "pa-service": "内覧同行サービス",
+            "reform": "リフォーム",
+            "service": "サービス",
+            "works": "施工事例",
+        }
+
+        for segment in segments:
+            if segment in segment_titles:
+                return segment_titles[segment]
+        return "関連ページ"

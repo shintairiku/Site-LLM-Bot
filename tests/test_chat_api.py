@@ -106,6 +106,7 @@ async def test_chat_api_with_mock_openai() -> None:
     assert response.json()["source"] == "openai"
     assert "施工エリア" in response.json()["answer"]
     assert "関連リンク:" in response.json()["answer"]
+    assert "【会社情報】" in response.json()["answer"]
     assert "https://shintairiku.jp/company/" in response.json()["answer"]
     assert response.json()["session_id"]
     await openai_client.aclose()
@@ -151,7 +152,7 @@ def test_openai_handler_sanitizes_markdown_and_source_links() -> None:
     assert "SNS・ホームページ・Web広告" in sanitized
 
 
-def test_openai_handler_appends_related_links_from_allowed_sources() -> None:
+def test_openai_handler_appends_related_links_with_titles_from_citations() -> None:
     handler = OpenAIChatHandler(
         api_key="test-key",
         model="gpt-5.4-mini",
@@ -161,23 +162,40 @@ def test_openai_handler_appends_related_links_from_allowed_sources() -> None:
     data = {
         "output": [
             {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "イベント情報をご案内します。",
+                        "annotations": [
+                            {
+                                "type": "url_citation",
+                                "title": "イベント情報 | サンプル工務店",
+                                "url": "https://www.shintairiku.jp/event/#detail",
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
                 "type": "web_search_call",
                 "action": {
                     "sources": [
-                        {"url": "https://example.com/article"},
-                        {"url": "https://www.shintairiku.jp/event/#detail"},
-                        {"url": "https://www.shintairiku.jp/event/"},
+                        {"title": "外部記事", "url": "https://example.com/article"},
+                        {"title": "重複イベント", "url": "https://www.shintairiku.jp/event/"},
                     ]
                 },
             }
         ],
     }
 
-    related_links = handler._extract_allowed_source_urls(data)
+    related_links = handler._extract_allowed_source_links(data)
     answer = handler._finalize_answer("イベント情報をご案内します。", True, related_links)
 
-    assert related_links == ["https://www.shintairiku.jp/event/"]
-    assert answer.endswith("関連リンク:\n- https://www.shintairiku.jp/event/")
+    assert len(related_links) == 1
+    assert related_links[0].title == "イベント情報"
+    assert related_links[0].url == "https://www.shintairiku.jp/event/"
+    assert answer.endswith("関連リンク:\n【イベント情報】\n- https://www.shintairiku.jp/event/")
     assert "https://example.com/article" not in answer
 
 
