@@ -22,7 +22,10 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def build_settings(api_key: str | None = "test-key") -> Settings:
+def build_settings(
+    api_key: str | None = "test-key",
+    widget_api_base: str = "",
+) -> Settings:
     tenant1 = TenantConfig(
         tenant_id="sample-shintairiku",
         display_name="サンプル工務店",
@@ -48,6 +51,7 @@ def build_settings(api_key: str | None = "test-key") -> Settings:
         session_ttl_seconds=1800,
         max_history_messages=6,
         tenant_config_path="config/tenants.json",
+        widget_api_base=widget_api_base,
         default_tenant_id=tenant1.tenant_id,
         tenants={tenant1.tenant_id: tenant1, tenant2.tenant_id: tenant2},
     )
@@ -66,6 +70,37 @@ def test_demo_tenants_use_single_allowed_domain() -> None:
     assert tenant_settings.tenants["sample-shintairiku"].allowed_domains == ["shintairiku.jp"]
     assert tenant_settings.tenants["reform-tamao"].allowed_domains == ["reform-tamao.com"]
     assert tenant_settings.tenants["more-living"].allowed_domains == ["moreliving.co.jp"]
+
+
+def test_settings_reads_widget_api_base_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    tenant_config = tmp_path / "tenants.json"
+    tenant_config.write_text(
+        json.dumps(
+            {
+                "default_tenant_id": "sample-shintairiku",
+                "tenants": [
+                    {
+                        "tenant_id": "sample-shintairiku",
+                        "display_name": "新大陸",
+                        "primary_color": "#155e75",
+                        "greeting": "こんにちは。",
+                        "suggested_questions": [],
+                        "allowed_domains": ["shintairiku.jp"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TENANT_CONFIG_PATH", str(tenant_config))
+    monkeypatch.setenv("WIDGET_API_BASE", "https://dev-backend.example.com/")
+
+    settings = Settings.from_env()
+
+    assert settings.widget_api_base == "https://dev-backend.example.com"
 
 
 @pytest.mark.anyio
@@ -353,3 +388,23 @@ def test_demo_and_static_routes_exist() -> None:
     paths = {route.path for route in app.routes if hasattr(route, "path")}
     assert "/demo" in paths
     assert "/static" in paths
+
+
+@pytest.mark.anyio
+async def test_demo_page_injects_widget_api_base() -> None:
+    app = create_app(
+        settings=build_settings(
+            api_key=None,
+            widget_api_base="https://dev-backend.example.com",
+        )
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/demo")
+
+    assert response.status_code == 200
+    assert 'data-api-base="https://dev-backend.example.com"' in response.text
+    assert "__WIDGET_API_BASE__" not in response.text

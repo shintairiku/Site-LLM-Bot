@@ -32,6 +32,7 @@ class Settings:
     session_ttl_seconds: int
     max_history_messages: int
     tenant_config_path: str
+    widget_api_base: str
     default_tenant_id: str
     tenants: dict[str, "TenantConfig"] = field(default_factory=dict)
 
@@ -49,6 +50,7 @@ class Settings:
             session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "1800")),
             max_history_messages=int(os.getenv("MAX_HISTORY_MESSAGES", "6")),
             tenant_config_path=tenant_config_path,
+            widget_api_base=os.getenv("WIDGET_API_BASE", "").rstrip("/"),
             default_tenant_id=tenant_settings.default_tenant_id,
             tenants=tenant_settings.tenants,
         )

@@ -9,7 +9,7 @@
   const baseUrl = new URL("./", script.src || window.location.href);
   const cssUrl = new URL("mock-widget.css", baseUrl).toString();
   const apiBase = resolveApiBase(
-    script.dataset.apiBase || "https://site-llm-bot-742231208085.asia-northeast1.run.app"
+    script.dataset.apiBase
   );
   let tenantId = script.dataset.tenantId || "sample-shintairiku";
   let tenantName = script.dataset.tenantName || "サンプル工務店";
@@ -263,13 +263,19 @@
   }
 
   function resolveApiBase(configuredApiBase) {
+    if (configuredApiBase && configuredApiBase !== "__WIDGET_API_BASE__") {
+      return configuredApiBase.replace(/\/+$/, "");
+    }
+    if (configuredApiBase === "" && window.location.origin !== "null") {
+      return window.location.origin;
+    }
     if (
       window.location.origin !== "null" &&
       (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
     ) {
       return window.location.origin;
     }
-    return configuredApiBase;
+    return "https://site-llm-bot-742231208085.asia-northeast1.run.app";
   }
 
   // パネルのタイトルに tenantName を埋め込むための最低限のエスケープ関数。

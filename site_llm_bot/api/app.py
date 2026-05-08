@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -56,12 +57,12 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/")
-    async def index() -> FileResponse:
-        return FileResponse(BASE_DIR / "demo" / "sample_page.html")
+    async def index() -> HTMLResponse:
+        return render_demo_page(app_settings)
 
     @app.get("/demo")
-    async def demo_page() -> FileResponse:
-        return FileResponse(BASE_DIR / "demo" / "sample_page.html")
+    async def demo_page() -> HTMLResponse:
+        return render_demo_page(app_settings)
 
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat(request: ChatRequest) -> ChatResponse:
@@ -114,3 +115,10 @@ def resolve_tenant(settings: Settings, tenant_id: str | None) -> TenantConfig:
     if tenant is None:
         raise HTTPException(status_code=404, detail="tenant not found")
     return tenant
+
+
+def render_demo_page(settings: Settings) -> HTMLResponse:
+    """環境ごとのバックエンド接続先を埋め込んだデモページを返す。"""
+    html = (BASE_DIR / "demo" / "sample_page.html").read_text(encoding="utf-8")
+    html = html.replace("__WIDGET_API_BASE__", escape(settings.widget_api_base, quote=True))
+    return HTMLResponse(html)
