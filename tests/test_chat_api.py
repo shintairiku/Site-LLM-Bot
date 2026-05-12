@@ -515,5 +515,8 @@ async def test_demo_page_injects_widget_api_base() -> None:
         response = await client.get("/demo")
 
     assert response.status_code == 200
+    assert 'src="/static/mock-widget.js"' in response.text
     assert 'data-api-base="https://dev-backend.example.com"' in response.text
+    assert 'data-public-token="public_sample_shintairiku"' in response.text
+    assert "site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js" not in response.text
     assert "__WIDGET_API_BASE__" not in response.text
