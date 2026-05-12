@@ -88,6 +88,12 @@ def test_demo_tenants_use_single_allowed_domain() -> None:
     assert tenant_settings.tenants["sample-shintairiku"].allowed_domains == ["shintairiku.jp"]
     assert tenant_settings.tenants["reform-tamao"].allowed_domains == ["reform-tamao.com"]
     assert tenant_settings.tenants["more-living"].allowed_domains == ["moreliving.co.jp"]
+    for tenant in tenant_settings.tenants.values():
+        assert "https://site-llm-bot-dev.vercel.app" in tenant.allowed_origins
+        assert (
+            "https://site-llm-bot-dev-742231208085.asia-northeast1.run.app"
+            in tenant.allowed_origins
+        )
 
 
 def test_settings_reads_widget_api_base_from_env(
