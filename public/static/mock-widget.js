@@ -13,6 +13,7 @@
   );
   let tenantId = script.dataset.tenantId || "sample-shintairiku";
   let tenantName = script.dataset.tenantName || "サンプル工務店";
+  let publicToken = script.dataset.publicToken || "";
   let accent = script.dataset.color || "#155e75";
   let sessionId = null;
   const suggestions = [
@@ -106,6 +107,9 @@
       tenantName = detail.tenantName;
       titleEl.textContent = `${tenantName} AI相談窓口`;
     }
+    if (detail.publicToken) {
+      publicToken = detail.publicToken;
+    }
     if (detail.color) {
       accent = detail.color;
       document.documentElement.style.setProperty("--widget-primary", accent);
@@ -177,6 +181,8 @@
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-Tenant-Id": script.dataset.tenantId || tenantId,
+        "X-Widget-Token": script.dataset.publicToken || publicToken,
       },
       body: JSON.stringify({
         tenant_id: script.dataset.tenantId || tenantId,

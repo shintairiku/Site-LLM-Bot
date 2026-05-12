@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
+import re
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,9 +47,10 @@ def create_app(
     app = FastAPI(title="Site LLM Bot API", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=collect_allowed_origins(app_settings),
+        allow_origin_regex=build_allowed_origin_regex(app_settings),
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "X-Tenant-Id", "X-Widget-Token"],
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -65,17 +67,28 @@ def create_app(
         return render_demo_page(app_settings)
 
     @app.post("/api/chat", response_model=ChatResponse)
-    async def chat(request: ChatRequest) -> ChatResponse:
+    async def chat(
+        chat_request: ChatRequest,
+        http_request: Request,
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+        x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
+    ) -> ChatResponse:
         """ウィジェット -> API -> OpenAI の導線。tenant_id ごとに検索対象を切り替える。"""
-        tenant = resolve_tenant(app_settings, request.tenant_id)
+        tenant = authenticate_widget_request(
+            settings=app_settings,
+            request_tenant_id=chat_request.tenant_id,
+            header_tenant_id=x_tenant_id,
+            widget_token=x_widget_token,
+            origin=http_request.headers.get("origin"),
+        )
         if not tenant.allowed_domains:
             raise HTTPException(status_code=403, detail="allowed domains not configured")
 
-        message = request.message.strip()
+        message = chat_request.message.strip()
         if not message:
             raise HTTPException(status_code=400, detail="message is required")
 
-        session = session_store.get_or_create(request.session_id)
+        session = session_store.get_or_create(chat_request.session_id)
         history = session_store.history(
             session.session_id,
             limit=app_settings.max_history_messages,
@@ -92,7 +105,7 @@ def create_app(
         try:
             result = await chat_handler.generate_answer(
                 message=message,
-                page_url=request.page_url,
+                page_url=chat_request.page_url,
                 history=history,
             )
         except httpx.HTTPStatusError as exc:
@@ -115,6 +128,63 @@ def resolve_tenant(settings: Settings, tenant_id: str | None) -> TenantConfig:
     if tenant is None:
         raise HTTPException(status_code=404, detail="tenant not found")
     return tenant
+
+
+def authenticate_widget_request(
+    *,
+    settings: Settings,
+    request_tenant_id: str | None,
+    header_tenant_id: str | None,
+    widget_token: str | None,
+    origin: str | None,
+) -> TenantConfig:
+    """公開ウィジェットからの呼び出しをテナント設定で検証する。"""
+    if request_tenant_id and header_tenant_id and request_tenant_id != header_tenant_id:
+        raise HTTPException(status_code=403, detail="tenant mismatch")
+
+    tenant = resolve_tenant(settings, header_tenant_id or request_tenant_id)
+    if tenant.status != "active":
+        raise HTTPException(status_code=403, detail="tenant is inactive")
+    if not tenant.public_token or widget_token != tenant.public_token:
+        raise HTTPException(status_code=403, detail="invalid widget token")
+    if not origin:
+        raise HTTPException(status_code=403, detail="origin header is required")
+    if not is_origin_allowed(tenant, origin):
+        raise HTTPException(status_code=403, detail="origin is not allowed")
+    return tenant
+
+
+def collect_allowed_origins(settings: Settings) -> list[str]:
+    """CORS preflight 用に、全テナントの許可 Origin をまとめる。"""
+    return sorted(
+        {
+            origin
+            for tenant in settings.tenants.values()
+            for origin in tenant.allowed_origins
+        }
+    )
+
+
+def build_allowed_origin_regex(settings: Settings) -> str | None:
+    """CORS middleware に渡す許可 Origin 正規表現を組み立てる。"""
+    patterns = [
+        pattern
+        for tenant in settings.tenants.values()
+        for pattern in tenant.allowed_origin_patterns
+    ]
+    if not patterns:
+        return None
+    return "|".join(f"(?:{pattern})" for pattern in sorted(set(patterns)))
+
+
+def is_origin_allowed(tenant: TenantConfig, origin: str) -> bool:
+    """テナントごとの登録 Origin とパターンで実リクエストを検証する。"""
+    if origin in tenant.allowed_origins:
+        return True
+    return any(
+        re.fullmatch(pattern, origin) is not None
+        for pattern in tenant.allowed_origin_patterns
+    )
 
 
 def render_demo_page(settings: Settings) -> HTMLResponse:
