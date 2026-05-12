@@ -33,6 +33,8 @@ def build_settings(
         greeting="こんにちは。",
         suggested_questions=["施工エリアを教えてください"],
         allowed_domains=["shintairiku.jp"],
+        allowed_origins=["https://tenant-one.example.com", "http://localhost:8000"],
+        public_token="public_sample_shintairiku",
     )
     tenant2 = TenantConfig(
         tenant_id="tenant-two",
@@ -41,6 +43,9 @@ def build_settings(
         greeting="こんにちは。",
         suggested_questions=["会社について教えてください"],
         allowed_domains=["d.example.com", "e.example.com"],
+        allowed_origins=["https://tenant-two.example.com"],
+        allowed_origin_patterns=[r"https://tenant-two-[a-z0-9]+\.example\.com"],
+        public_token="public_tenant_two",
     )
     return Settings(
         openai_api_key=api_key,
@@ -57,11 +62,24 @@ def build_settings(
     )
 
 
+def widget_headers(
+    tenant_id: str = "sample-shintairiku",
+    token: str = "public_sample_shintairiku",
+    origin: str = "https://tenant-one.example.com",
+) -> dict[str, str]:
+    return {
+        "Origin": origin,
+        "X-Tenant-Id": tenant_id,
+        "X-Widget-Token": token,
+    }
+
+
 def test_default_tenant_uses_configured_allowed_domains() -> None:
     tenant_settings = load_tenant_settings("config/tenants.json")
     tenant = tenant_settings.tenants[tenant_settings.default_tenant_id]
 
     assert tenant.allowed_domains == ["shintairiku.jp"]
+    assert tenant.public_token == "public_sample_shintairiku"
 
 
 def test_demo_tenants_use_single_allowed_domain() -> None:
@@ -143,6 +161,7 @@ async def test_chat_api_with_mock_openai() -> None:
                 "message": "施工エリアを教えてください",
                 "page_url": "http://localhost/demo",
             },
+            headers=widget_headers(),
         )
 
     assert response.status_code == 200
@@ -190,10 +209,16 @@ async def test_chat_api_switches_allowed_domains_by_tenant() -> None:
         await client.post(
             "/api/chat",
             json={"tenant_id": "sample-shintairiku", "message": "質問1"},
+            headers=widget_headers(),
         )
         await client.post(
             "/api/chat",
             json={"tenant_id": "tenant-two", "message": "質問2"},
+            headers=widget_headers(
+                tenant_id="tenant-two",
+                token="public_tenant_two",
+                origin="https://tenant-two.example.com",
+            ),
         )
 
     assert seen_allowed_domains[0] == ["shintairiku.jp"]
@@ -320,6 +345,7 @@ async def test_chat_api_returns_safe_message_when_allowed_domain_source_is_missi
         response = await client.post(
             "/api/chat",
             json={"message": "会社の強みを教えてください"},
+            headers=widget_headers(),
         )
 
     assert response.status_code == 200
@@ -338,6 +364,7 @@ async def test_chat_api_demo_fallback_without_api_key() -> None:
         response = await client.post(
             "/api/chat",
             json={"message": "相談の流れを知りたいです"},
+            headers=widget_headers(),
         )
 
     assert response.status_code == 200
@@ -347,7 +374,7 @@ async def test_chat_api_demo_fallback_without_api_key() -> None:
 
 
 @pytest.mark.anyio
-async def test_chat_api_cors_allows_any_origin() -> None:
+async def test_chat_api_cors_rejects_unknown_origin() -> None:
     app = create_app(settings=build_settings(api_key=None))
 
     async with httpx.AsyncClient(
@@ -359,12 +386,87 @@ async def test_chat_api_cors_allows_any_origin() -> None:
             headers={
                 "Origin": "https://unknown.example.com",
                 "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "content-type",
+                "Access-Control-Request-Headers": "content-type,x-tenant-id,x-widget-token",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.anyio
+async def test_chat_api_cors_allows_registered_origin() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.options(
+            "/api/chat",
+            headers={
+                "Origin": "https://tenant-one.example.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-tenant-id,x-widget-token",
             },
         )
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "*"
+    assert response.headers["access-control-allow-origin"] == "https://tenant-one.example.com"
+
+
+@pytest.mark.anyio
+async def test_chat_api_rejects_invalid_widget_token() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            json={"tenant_id": "sample-shintairiku", "message": "相談したいです"},
+            headers=widget_headers(token="wrong-token"),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "invalid widget token"
+
+
+@pytest.mark.anyio
+async def test_chat_api_rejects_unregistered_origin() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            json={"tenant_id": "sample-shintairiku", "message": "相談したいです"},
+            headers=widget_headers(origin="https://unknown.example.com"),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "origin is not allowed"
+
+
+@pytest.mark.anyio
+async def test_chat_api_rejects_body_and_header_tenant_mismatch() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            json={"tenant_id": "tenant-two", "message": "相談したいです"},
+            headers=widget_headers(),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "tenant mismatch"
 
 
 @pytest.mark.anyio
@@ -378,6 +480,7 @@ async def test_chat_api_rejects_unknown_tenant() -> None:
         response = await client.post(
             "/api/chat",
             json={"tenant_id": "unknown-tenant", "message": "相談したいです"},
+            headers=widget_headers(tenant_id="unknown-tenant"),
         )
 
     assert response.status_code == 404
