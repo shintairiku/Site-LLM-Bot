@@ -36,6 +36,37 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+class WidgetConfigResponse(BaseModel):
+    """ウィジェット初期化に必要な公開設定。"""
+
+    tenant_id: str
+    display_name: str
+    primary_color: str
+    greeting: str
+    suggested_questions: list[str]
+
+
+class ChatSessionResponse(BaseModel):
+    """チャットセッション開始レスポンス。"""
+
+    session_id: str
+    expires_in: int
+
+
+class ChatMessageMetadata(BaseModel):
+    """チャット発話に付随するメタデータ。"""
+
+    page_url: str | None = None
+
+
+class ChatMessageRequest(BaseModel):
+    """本番系チャットメッセージAPIの入力。"""
+
+    session_id: str | None = None
+    message: str = Field(..., min_length=1)
+    metadata: ChatMessageMetadata = Field(default_factory=ChatMessageMetadata)
+
+
 def create_app(
     settings: Settings | None = None,
     openai_client: httpx.AsyncClient | None = None,
@@ -66,6 +97,73 @@ def create_app(
     async def demo_page() -> HTMLResponse:
         return render_demo_page(app_settings)
 
+    @app.get("/v1/widget/config", response_model=WidgetConfigResponse)
+    async def widget_config(
+        http_request: Request,
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+        x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
+    ) -> WidgetConfigResponse:
+        """ウィジェット表示に必要な公開設定を返す。"""
+        tenant = authenticate_widget_request(
+            settings=app_settings,
+            request_tenant_id=None,
+            header_tenant_id=x_tenant_id,
+            widget_token=x_widget_token,
+            origin=http_request.headers.get("origin"),
+        )
+        return WidgetConfigResponse(
+            tenant_id=tenant.tenant_id,
+            display_name=tenant.display_name,
+            primary_color=tenant.primary_color,
+            greeting=tenant.greeting,
+            suggested_questions=tenant.suggested_questions,
+        )
+
+    @app.post("/v1/chat/session", response_model=ChatSessionResponse)
+    async def create_chat_session(
+        http_request: Request,
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+        x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
+    ) -> ChatSessionResponse:
+        """新規チャットセッションを開始する。"""
+        authenticate_widget_request(
+            settings=app_settings,
+            request_tenant_id=None,
+            header_tenant_id=x_tenant_id,
+            widget_token=x_widget_token,
+            origin=http_request.headers.get("origin"),
+        )
+        session = session_store.get_or_create(None)
+        return ChatSessionResponse(
+            session_id=session.session_id,
+            expires_in=app_settings.session_ttl_seconds,
+        )
+
+    @app.post("/v1/chat/message", response_model=ChatResponse)
+    async def chat_message(
+        chat_request: ChatMessageRequest,
+        http_request: Request,
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+        x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
+    ) -> ChatResponse:
+        """本番系のメッセージ送信API。SSE化前の暫定JSON応答。"""
+        tenant = authenticate_widget_request(
+            settings=app_settings,
+            request_tenant_id=None,
+            header_tenant_id=x_tenant_id,
+            widget_token=x_widget_token,
+            origin=http_request.headers.get("origin"),
+        )
+        return await generate_chat_response(
+            settings=app_settings,
+            session_store=session_store,
+            tenant=tenant,
+            openai_client=openai_client,
+            session_id=chat_request.session_id,
+            message=chat_request.message,
+            page_url=chat_request.metadata.page_url,
+        )
+
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat(
         chat_request: ChatRequest,
@@ -84,41 +182,66 @@ def create_app(
         if not tenant.allowed_domains:
             raise HTTPException(status_code=403, detail="allowed domains not configured")
 
-        message = chat_request.message.strip()
-        if not message:
-            raise HTTPException(status_code=400, detail="message is required")
-
-        session = session_store.get_or_create(chat_request.session_id)
-        history = session_store.history(
-            session.session_id,
-            limit=app_settings.max_history_messages,
+        return await generate_chat_response(
+            settings=app_settings,
+            session_store=session_store,
+            tenant=tenant,
+            openai_client=openai_client,
+            session_id=chat_request.session_id,
+            message=chat_request.message,
+            page_url=chat_request.page_url,
         )
-        session_store.append_message(session.session_id, "user", message)
-        chat_handler = OpenAIChatHandler(
-            api_key=app_settings.openai_api_key,
-            model=app_settings.openai_model,
-            search_allowed_domains=tenant.allowed_domains,
-            timeout_seconds=app_settings.openai_timeout_seconds,
-            client=openai_client,
-        )
-
-        try:
-            result = await chat_handler.generate_answer(
-                message=message,
-                page_url=chat_request.page_url,
-                history=history,
-            )
-        except httpx.HTTPStatusError as exc:
-            detail = exc.response.text if exc.response is not None else str(exc)
-            raise HTTPException(status_code=502, detail=f"OpenAI API error: {detail}") from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
-
-        session_store.append_message(session.session_id, "assistant", result.answer)
-        source = "openai" if app_settings.openai_api_key else "demo"
-        return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
     return app
+
+
+async def generate_chat_response(
+    *,
+    settings: Settings,
+    session_store: InMemorySessionStore,
+    tenant: TenantConfig,
+    openai_client: httpx.AsyncClient | None,
+    session_id: str | None,
+    message: str,
+    page_url: str | None,
+) -> ChatResponse:
+    """認証済みテナントのチャット応答を生成する。"""
+    if not tenant.allowed_domains:
+        raise HTTPException(status_code=403, detail="allowed domains not configured")
+
+    normalized_message = message.strip()
+    if not normalized_message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    session = session_store.get_or_create(session_id)
+    history = session_store.history(
+        session.session_id,
+        limit=settings.max_history_messages,
+    )
+    session_store.append_message(session.session_id, "user", normalized_message)
+    chat_handler = OpenAIChatHandler(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        search_allowed_domains=tenant.allowed_domains,
+        timeout_seconds=settings.openai_timeout_seconds,
+        client=openai_client,
+    )
+
+    try:
+        result = await chat_handler.generate_answer(
+            message=normalized_message,
+            page_url=page_url,
+            history=history,
+        )
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text if exc.response is not None else str(exc)
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {detail}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
+
+    session_store.append_message(session.session_id, "assistant", result.answer)
+    source = "openai" if settings.openai_api_key else "demo"
+    return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
 
 def resolve_tenant(settings: Settings, tenant_id: str | None) -> TenantConfig:
