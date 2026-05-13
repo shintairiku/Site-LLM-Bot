@@ -612,6 +612,20 @@ def test_demo_and_static_routes_exist() -> None:
     assert "/v1/chat/message" in paths
 
 
+def test_distribution_widget_assets_exist() -> None:
+    assert (ROOT_DIR / "static" / "widget.js").exists()
+    assert (ROOT_DIR / "static" / "widget.css").exists()
+    assert (ROOT_DIR / "public" / "static" / "widget.js").exists()
+    assert (ROOT_DIR / "public" / "static" / "widget.css").exists()
+
+    widget_js = (ROOT_DIR / "static" / "widget.js").read_text(encoding="utf-8")
+    widget_css = (ROOT_DIR / "static" / "widget.css").read_text(encoding="utf-8")
+    assert 'new URL("widget.css", baseUrl)' in widget_js
+    assert "mock-widget.css" not in widget_js
+    assert "mock-chatbot" not in widget_js
+    assert "mock-chatbot" not in widget_css
+
+
 @pytest.mark.anyio
 async def test_demo_page_injects_widget_api_base() -> None:
     app = create_app(
@@ -628,7 +642,7 @@ async def test_demo_page_injects_widget_api_base() -> None:
         response = await client.get("/demo")
 
     assert response.status_code == 200
-    assert 'src="/static/mock-widget.js"' in response.text
+    assert 'src="/static/widget.js"' in response.text
     assert 'data-api-base="https://dev-backend.example.com"' in response.text
     assert 'data-public-token="public_sample_shintairiku"' in response.text
     assert "site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js" not in response.text
