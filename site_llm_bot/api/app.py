@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from site_llm_bot.config import Settings, TenantConfig
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
-from site_llm_bot.services.session_store import InMemorySessionStore
+from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 STATIC_DIR = BASE_DIR / "static"
@@ -126,14 +126,19 @@ def create_app(
         x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
     ) -> ChatSessionResponse:
         """新規チャットセッションを開始する。"""
-        authenticate_widget_request(
+        origin = http_request.headers.get("origin")
+        tenant = authenticate_widget_request(
             settings=app_settings,
             request_tenant_id=None,
             header_tenant_id=x_tenant_id,
             widget_token=x_widget_token,
-            origin=http_request.headers.get("origin"),
+            origin=origin,
         )
-        session = session_store.get_or_create(None)
+        session = session_store.get_or_create(
+            None,
+            tenant_id=tenant.tenant_id,
+            origin=origin,
+        )
         return ChatSessionResponse(
             session_id=session.session_id,
             expires_in=app_settings.session_ttl_seconds,
@@ -147,12 +152,13 @@ def create_app(
         x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
     ) -> ChatResponse:
         """本番系のメッセージ送信API。SSE化前の暫定JSON応答。"""
+        origin = http_request.headers.get("origin")
         tenant = authenticate_widget_request(
             settings=app_settings,
             request_tenant_id=None,
             header_tenant_id=x_tenant_id,
             widget_token=x_widget_token,
-            origin=http_request.headers.get("origin"),
+            origin=origin,
         )
         return await generate_chat_response(
             settings=app_settings,
@@ -162,6 +168,7 @@ def create_app(
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
+            origin=origin,
         )
 
     @app.post("/api/chat", response_model=ChatResponse)
@@ -172,12 +179,13 @@ def create_app(
         x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
     ) -> ChatResponse:
         """ウィジェット -> API -> OpenAI の導線。tenant_id ごとに検索対象を切り替える。"""
+        origin = http_request.headers.get("origin")
         tenant = authenticate_widget_request(
             settings=app_settings,
             request_tenant_id=chat_request.tenant_id,
             header_tenant_id=x_tenant_id,
             widget_token=x_widget_token,
-            origin=http_request.headers.get("origin"),
+            origin=origin,
         )
         if not tenant.allowed_domains:
             raise HTTPException(status_code=403, detail="allowed domains not configured")
@@ -190,6 +198,7 @@ def create_app(
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.page_url,
+            origin=origin,
         )
 
     return app
@@ -204,6 +213,7 @@ async def generate_chat_response(
     session_id: str | None,
     message: str,
     page_url: str | None,
+    origin: str | None,
 ) -> ChatResponse:
     """認証済みテナントのチャット応答を生成する。"""
     if not tenant.allowed_domains:
@@ -213,7 +223,15 @@ async def generate_chat_response(
     if not normalized_message:
         raise HTTPException(status_code=400, detail="message is required")
 
-    session = session_store.get_or_create(session_id)
+    try:
+        session = session_store.get_or_create(
+            session_id,
+            tenant_id=tenant.tenant_id,
+            origin=origin,
+        )
+    except TenantSessionMismatch as exc:
+        raise HTTPException(status_code=403, detail="session tenant mismatch") from exc
+
     history = session_store.history(
         session.session_id,
         limit=settings.max_history_messages,

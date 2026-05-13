@@ -6,6 +6,10 @@ from threading import Lock
 from uuid import uuid4
 
 
+class TenantSessionMismatch(Exception):
+    """セッションのテナント ID がリクエストのテナントと一致しない。"""
+
+
 @dataclass(slots=True)
 class ChatMessage:
     """1件分の会話メッセージ。"""
@@ -19,9 +23,11 @@ class ChatSession:
     """オンメモリで持つ会話セッション。"""
 
     session_id: str
+    tenant_id: str
     created_at: datetime
     updated_at: datetime
     messages: list[ChatMessage] = field(default_factory=list)
+    origin: str | None = None
 
 
 class InMemorySessionStore:
@@ -32,18 +38,32 @@ class InMemorySessionStore:
         self._sessions: dict[str, ChatSession] = {}
         self._lock = Lock()
 
-    def get_or_create(self, session_id: str | None) -> ChatSession:
-        """既存セッションを返すか、新規セッションを作る。"""
+    def get_or_create(
+        self,
+        session_id: str | None,
+        tenant_id: str,
+        origin: str | None = None,
+    ) -> ChatSession:
+        """既存セッションを返すか、新規セッションを作る。
+
+        既存セッションのテナントがリクエストと異なる場合は TenantSessionMismatch を送出する。
+        """
         now = datetime.now(UTC)
         with self._lock:
             self._cleanup_locked(now)
             if session_id and session_id in self._sessions:
                 session = self._sessions[session_id]
+                if session.tenant_id != tenant_id:
+                    raise TenantSessionMismatch(
+                        f"session belongs to tenant {session.tenant_id!r}"
+                    )
                 session.updated_at = now
                 return session
 
             session = ChatSession(
                 session_id=str(uuid4()),
+                tenant_id=tenant_id,
+                origin=origin,
                 created_at=now,
                 updated_at=now,
             )
