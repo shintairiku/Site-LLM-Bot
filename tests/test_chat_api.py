@@ -380,6 +380,116 @@ async def test_chat_api_demo_fallback_without_api_key() -> None:
 
 
 @pytest.mark.anyio
+async def test_v1_widget_config_returns_tenant_public_settings() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/v1/widget/config",
+            headers=widget_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "tenant_id": "sample-shintairiku",
+        "display_name": "サンプル工務店",
+        "primary_color": "#155e75",
+        "greeting": "こんにちは。",
+        "suggested_questions": ["施工エリアを教えてください"],
+    }
+
+
+@pytest.mark.anyio
+async def test_v1_chat_session_returns_session_id_and_expiry() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/v1/chat/session",
+            headers=widget_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["session_id"]
+    assert response.json()["expires_in"] == 1800
+
+
+@pytest.mark.anyio
+async def test_v1_chat_message_with_mock_openai() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload["tools"][0]["filters"]["allowed_domains"] == ["shintairiku.jp"]
+        return httpx.Response(
+            200,
+            json={
+                "output_text": "施工エリアは東京都内を中心に対応しています。",
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "action": {
+                            "sources": [
+                                {
+                                    "url": "https://shintairiku.jp/company/",
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+        )
+
+    openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(settings=build_settings(), openai_client=openai_client)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        session_response = await client.post(
+            "/v1/chat/session",
+            headers=widget_headers(),
+        )
+        response = await client.post(
+            "/v1/chat/message",
+            headers=widget_headers(),
+            json={
+                "session_id": session_response.json()["session_id"],
+                "message": "施工エリアを教えてください",
+                "metadata": {"page_url": "https://tenant-one.example.com/reform"},
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "openai"
+    assert response.json()["session_id"] == session_response.json()["session_id"]
+    assert "施工エリア" in response.json()["answer"]
+    await openai_client.aclose()
+
+
+@pytest.mark.anyio
+async def test_v1_api_rejects_invalid_widget_token() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/v1/widget/config",
+            headers=widget_headers(token="wrong-token"),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "invalid widget token"
+
+
+@pytest.mark.anyio
 async def test_chat_api_cors_rejects_unknown_origin() -> None:
     app = create_app(settings=build_settings(api_key=None))
 
@@ -497,6 +607,9 @@ def test_demo_and_static_routes_exist() -> None:
     paths = {route.path for route in app.routes if hasattr(route, "path")}
     assert "/demo" in paths
     assert "/static" in paths
+    assert "/v1/widget/config" in paths
+    assert "/v1/chat/session" in paths
+    assert "/v1/chat/message" in paths
 
 
 @pytest.mark.anyio
