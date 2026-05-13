@@ -492,6 +492,39 @@ async def test_chat_api_rejects_unknown_tenant() -> None:
     assert response.status_code == 404
 
 
+@pytest.mark.anyio
+async def test_chat_api_rejects_cross_tenant_session_reuse() -> None:
+    """テナント A で作成したセッション ID をテナント B から利用しようとすると 403 になる。"""
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        # テナント A でセッションを作成する
+        resp_a = await client.post(
+            "/api/chat",
+            json={"message": "相談したいです"},
+            headers=widget_headers(),
+        )
+        assert resp_a.status_code == 200
+        session_id_a = resp_a.json()["session_id"]
+
+        # 同じセッション ID をテナント B から使おうとする
+        resp_b = await client.post(
+            "/api/chat",
+            json={"message": "別テナントから流用", "session_id": session_id_a},
+            headers=widget_headers(
+                tenant_id="tenant-two",
+                token="public_tenant_two",
+                origin="https://tenant-two.example.com",
+            ),
+        )
+
+    assert resp_b.status_code == 403
+    assert resp_b.json()["detail"] == "session tenant mismatch"
+
+
 def test_demo_and_static_routes_exist() -> None:
     app = create_app(settings=build_settings(api_key=None))
     paths = {route.path for route in app.routes if hasattr(route, "path")}

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from site_llm_bot.config import Settings, TenantConfig
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
-from site_llm_bot.services.session_store import InMemorySessionStore
+from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 STATIC_DIR = BASE_DIR / "static"
@@ -74,51 +74,81 @@ def create_app(
         x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
     ) -> ChatResponse:
         """ウィジェット -> API -> OpenAI の導線。tenant_id ごとに検索対象を切り替える。"""
+        origin = http_request.headers.get("origin")
         tenant = authenticate_widget_request(
             settings=app_settings,
             request_tenant_id=chat_request.tenant_id,
             header_tenant_id=x_tenant_id,
             widget_token=x_widget_token,
-            origin=http_request.headers.get("origin"),
+            origin=origin,
         )
         if not tenant.allowed_domains:
             raise HTTPException(status_code=403, detail="allowed domains not configured")
 
-        message = chat_request.message.strip()
-        if not message:
-            raise HTTPException(status_code=400, detail="message is required")
-
-        session = session_store.get_or_create(chat_request.session_id)
-        history = session_store.history(
-            session.session_id,
-            limit=app_settings.max_history_messages,
+        return await generate_chat_response(
+            settings=app_settings,
+            session_store=session_store,
+            tenant=tenant,
+            openai_client=openai_client,
+            session_id=chat_request.session_id,
+            message=chat_request.message,
+            page_url=chat_request.page_url,
+            origin=origin,
         )
-        session_store.append_message(session.session_id, "user", message)
-        chat_handler = OpenAIChatHandler(
-            api_key=app_settings.openai_api_key,
-            model=app_settings.openai_model,
-            search_allowed_domains=tenant.allowed_domains,
-            timeout_seconds=app_settings.openai_timeout_seconds,
-            client=openai_client,
-        )
-
-        try:
-            result = await chat_handler.generate_answer(
-                message=message,
-                page_url=chat_request.page_url,
-                history=history,
-            )
-        except httpx.HTTPStatusError as exc:
-            detail = exc.response.text if exc.response is not None else str(exc)
-            raise HTTPException(status_code=502, detail=f"OpenAI API error: {detail}") from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
-
-        session_store.append_message(session.session_id, "assistant", result.answer)
-        source = "openai" if app_settings.openai_api_key else "demo"
-        return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
     return app
+
+
+async def generate_chat_response(
+    *,
+    settings: Settings,
+    session_store: InMemorySessionStore,
+    tenant: TenantConfig,
+    openai_client: httpx.AsyncClient | None,
+    session_id: str | None,
+    message: str,
+    page_url: str | None,
+    origin: str | None,
+) -> ChatResponse:
+    """認証済みテナントのチャット応答を生成する。"""
+    normalized_message = message.strip()
+    if not normalized_message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    try:
+        session = session_store.get_or_create(
+            session_id,
+            tenant_id=tenant.tenant_id,
+            origin=origin,
+        )
+    except TenantSessionMismatch as exc:
+        raise HTTPException(status_code=403, detail="session tenant mismatch") from exc
+
+    history = session_store.history(session.session_id, limit=settings.max_history_messages)
+    session_store.append_message(session.session_id, "user", normalized_message)
+    chat_handler = OpenAIChatHandler(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        search_allowed_domains=tenant.allowed_domains,
+        timeout_seconds=settings.openai_timeout_seconds,
+        client=openai_client,
+    )
+
+    try:
+        result = await chat_handler.generate_answer(
+            message=normalized_message,
+            page_url=page_url,
+            history=history,
+        )
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text if exc.response is not None else str(exc)
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {detail}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
+
+    session_store.append_message(session.session_id, "assistant", result.answer)
+    source = "openai" if settings.openai_api_key else "demo"
+    return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
 
 def resolve_tenant(settings: Settings, tenant_id: str | None) -> TenantConfig:
