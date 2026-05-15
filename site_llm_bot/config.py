@@ -62,7 +62,6 @@ class TenantConfig:
 
     tenant_id: str
     display_name: str
-    primary_color: str
     greeting: str
     suggested_questions: list[str]
     allowed_domains: list[str]
@@ -93,7 +92,6 @@ def load_tenant_settings(path: str) -> TenantSettings:
         tenant = TenantConfig(
             tenant_id=item["tenant_id"],
             display_name=item["display_name"],
-            primary_color=item["primary_color"],
             greeting=item["greeting"],
             suggested_questions=item.get("suggested_questions", []),
             allowed_domains=item.get("allowed_domains", []),

@@ -29,7 +29,6 @@ def build_settings(
     tenant1 = TenantConfig(
         tenant_id="sample-shintairiku",
         display_name="サンプル工務店",
-        primary_color="#155e75",
         greeting="こんにちは。",
         suggested_questions=["施工エリアを教えてください"],
         allowed_domains=["shintairiku.jp"],
@@ -39,7 +38,6 @@ def build_settings(
     tenant2 = TenantConfig(
         tenant_id="tenant-two",
         display_name="サンプルリフォーム店",
-        primary_color="#8a5a14",
         greeting="こんにちは。",
         suggested_questions=["会社について教えてください"],
         allowed_domains=["d.example.com", "e.example.com"],
@@ -109,7 +107,6 @@ def test_settings_reads_widget_api_base_from_env(
                     {
                         "tenant_id": "sample-shintairiku",
                         "display_name": "新大陸",
-                        "primary_color": "#155e75",
                         "greeting": "こんにちは。",
                         "suggested_questions": [],
                         "allowed_domains": ["shintairiku.jp"],
@@ -396,7 +393,6 @@ async def test_v1_widget_config_returns_tenant_public_settings() -> None:
     assert response.json() == {
         "tenant_id": "sample-shintairiku",
         "display_name": "サンプル工務店",
-        "primary_color": "#155e75",
         "greeting": "こんにちは。",
         "suggested_questions": ["施工エリアを教えてください"],
     }
@@ -781,10 +777,17 @@ def test_distribution_widget_assets_exist() -> None:
     assert (ROOT_DIR / "static" / "widget.css").exists()
     assert (ROOT_DIR / "public" / "static" / "widget.js").exists()
     assert (ROOT_DIR / "public" / "static" / "widget.css").exists()
+    assert (ROOT_DIR / "static" / "tenants" / "sample-shintairiku.css").exists()
+    assert (ROOT_DIR / "public" / "static" / "tenants" / "sample-shintairiku.css").exists()
 
     widget_js = (ROOT_DIR / "static" / "widget.js").read_text(encoding="utf-8")
     widget_css = (ROOT_DIR / "static" / "widget.css").read_text(encoding="utf-8")
     assert 'new URL("widget.css", baseUrl)' in widget_js
+    assert 'new URL("tenants/", baseUrl)' in widget_js
+    assert "ensureTenantCss(tenantId)" in widget_js
+    assert "dataset.color" not in widget_js
+    assert 'setProperty("--widget-primary"' not in widget_js
+    assert "--widget-primary-accent" in widget_css
     assert "mock-widget.css" not in widget_js
     assert "mock-chatbot" not in widget_js
     assert "mock-chatbot" not in widget_css
@@ -809,5 +812,6 @@ async def test_demo_page_injects_widget_api_base() -> None:
     assert 'src="/static/widget.js"' in response.text
     assert 'data-api-base="https://dev-backend.example.com"' in response.text
     assert 'data-public-token="public_sample_shintairiku"' in response.text
+    assert "data-color" not in response.text
     assert "site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js" not in response.text
     assert "__WIDGET_API_BASE__" not in response.text

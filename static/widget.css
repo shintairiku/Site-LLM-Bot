@@ -1,6 +1,8 @@
 :root {
   --widget-primary: #155e75;
   --widget-primary-strong: #0f4b5e;
+  --widget-primary-accent: #1c7a98;
+  --widget-primary-shadow: rgba(21, 94, 117, 0.28);
   --widget-text: #10212b;
   --widget-muted: #667782;
   --widget-surface: #f3f8f9;
@@ -15,10 +17,10 @@
   border: 0;
   border-radius: 999px;
   padding: 14px 18px;
-  background: linear-gradient(135deg, var(--widget-primary), #1c7a98);
+  background: linear-gradient(135deg, var(--widget-primary), var(--widget-primary-accent));
   color: #fff;
   font: 700 14px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
-  box-shadow: 0 18px 40px rgba(21, 94, 117, 0.28);
+  box-shadow: 0 18px 40px var(--widget-primary-shadow);
   cursor: pointer;
 }
 

@@ -4,7 +4,6 @@
     {
       "tenant_id": "sample-shintairiku",
       "display_name": "新大陸",
-      "primary_color": "#155e75",
       "public_token": "public_sample_shintairiku",
       "status": "active",
       "greeting": "こんにちは。住まいに関するご質問をお受けします。",
@@ -34,7 +33,6 @@
     {
       "tenant_id": "reform-tamao",
       "display_name": "リフォームのタマオ",
-      "primary_color": "#b45309",
       "public_token": "public_reform_tamao",
       "status": "active",
       "greeting": "こんにちは。リフォームに関するご質問をお受けします。",
@@ -64,7 +62,6 @@
     {
       "tenant_id": "more-living",
       "display_name": "MORE Living",
-      "primary_color": "#047857",
       "public_token": "public_more_living",
       "status": "active",
       "greeting": "こんにちは。住まいに関するご質問をお受けします。",

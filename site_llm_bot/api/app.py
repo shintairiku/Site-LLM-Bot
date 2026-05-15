@@ -39,11 +39,10 @@ class ChatResponse(BaseModel):
 
 
 class WidgetConfigResponse(BaseModel):
-    """ウィジェット初期化に必要な公開設定。"""
+    """ウィジェット初期化に必要な公開テキスト設定。"""
 
     tenant_id: str
     display_name: str
-    primary_color: str
     greeting: str
     suggested_questions: list[str]
 
@@ -116,7 +115,6 @@ def create_app(
         return WidgetConfigResponse(
             tenant_id=tenant.tenant_id,
             display_name=tenant.display_name,
-            primary_color=tenant.primary_color,
             greeting=tenant.greeting,
             suggested_questions=tenant.suggested_questions,
         )
