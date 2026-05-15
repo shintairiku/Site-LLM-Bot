@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
-from typing import Any
+from typing import Any, AsyncGenerator
 from urllib.parse import urlparse
 
 import httpx
@@ -44,6 +45,111 @@ class OpenAIChatHandler:
         self._search_allowed_domains = search_allowed_domains or []
         self._timeout_seconds = timeout_seconds
         self._client = client
+
+    async def generate_answer_stream(
+        self,
+        message: str,
+        page_url: str | None = None,
+        history: list[ChatMessage] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """ユーザー入力に対する LLM 応答をテキストチャンクとして逐次 yield する。
+
+        OpenAI Responses API のストリーミングを使い、web_search 完了後に
+        テキストデルタを yield する。API キー未設定時はデモテキストをチャンク送信する。
+        """
+        return self._stream_demo(message, page_url) if not self._api_key else self._stream_openai(message, page_url, history or [])
+
+    async def _stream_demo(
+        self,
+        message: str,
+        page_url: str | None,
+    ) -> AsyncGenerator[str, None]:
+        demo_text = (
+            "現在はデモモードです。"
+            f" 受信した質問: {message}"
+            + (f" / 閲覧ページ: {page_url}" if page_url else "")
+        )
+        for word in demo_text.split(" "):
+            yield word + " "
+
+    async def _stream_openai(
+        self,
+        message: str,
+        page_url: str | None,
+        history: list[ChatMessage],
+    ) -> AsyncGenerator[str, None]:
+        payload = self._build_payload(message=message, page_url=page_url, history=history)
+        payload["stream"] = True
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        owns_client = self._client is None
+        client: httpx.AsyncClient = self._client or httpx.AsyncClient(timeout=self._timeout_seconds)
+
+        try:
+            async with client.stream(
+                "POST",
+                "https://api.openai.com/v1/responses",
+                headers=headers,
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+
+                related_links: list[RelatedLink] = []
+                allowed_checked = False
+                safety_triggered = False
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    raw = line[6:]
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+
+                    event_type = event.get("type", "")
+
+                    if event_type == "response.output_item.done":
+                        item = event.get("item", {})
+                        if item.get("type") == "web_search_call":
+                            allowed_checked = True
+                            data = {"output": [item]}
+                            related_links = self._extract_allowed_source_links(data)
+                            used = bool(related_links) if self._search_allowed_domains else True
+                            if not used and self._search_allowed_domains:
+                                safety_triggered = True
+                                yield (
+                                    "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
+                                    " この内容はサイト内で裏取りできなかったため、正確な案内のためにお問い合わせください。"
+                                )
+                                return
+
+                    elif event_type == "response.output_text.delta" and not safety_triggered:
+                        delta = event.get("delta", "")
+                        if delta:
+                            yield delta
+
+                    elif event_type == "response.completed" and not safety_triggered:
+                        if not allowed_checked:
+                            # web_search が使われなかった場合は completed から sources を取得する
+                            completed = event.get("response", {})
+                            data = {"output": completed.get("output", [])}
+                            related_links = self._extract_allowed_source_links(data)
+
+                        if related_links:
+                            links_text = "\n".join(
+                                f"【{link.title}】\n- {link.url}"
+                                for link in related_links[:MAX_RELATED_LINKS]
+                            )
+                            yield f"\n\n関連リンク:\n{links_text}"
+        finally:
+            if owns_client:
+                await client.aclose()
 
     async def generate_answer(
         self,
