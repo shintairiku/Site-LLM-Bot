@@ -5,16 +5,16 @@
   }
 
   // 埋め込み script タグの data 属性を起点に、ウィジェット表示に必要な設定値を初期化する。
-  // この値は下の render 相当の処理と、テーマ反映、モック応答表示で参照される。
+  // 見た目は共通 CSS と tenant 別 CSS で管理し、顧客側の data 属性では制御しない。
   const baseUrl = new URL("./", script.src || window.location.href);
   const cssUrl = new URL("widget.css", baseUrl).toString();
+  const tenantCssBaseUrl = new URL("tenants/", baseUrl).toString();
   const apiBase = resolveApiBase(
     script.dataset.apiBase
   );
   let tenantId = script.dataset.tenantId || "sample-shintairiku";
   let tenantName = script.dataset.tenantName || "サンプル工務店";
   let publicToken = script.dataset.publicToken || "";
-  let accent = script.dataset.color || "#155e75";
   let sessionId = null;
   const suggestions = [
     "施工エリアを教えてください",
@@ -23,7 +23,7 @@
   ];
 
   ensureCss(cssUrl);
-  document.documentElement.style.setProperty("--widget-primary", accent);
+  ensureTenantCss(tenantId);
 
   // ランチャーボタンと本体パネルを先に構築し、以降の各関数は
   // messagesEl / suggestionsEl / statusEl / textarea を共有してUI更新を行う。
@@ -102,6 +102,7 @@
     const detail = event.detail || {};
     if (detail.tenantId) {
       tenantId = detail.tenantId;
+      ensureTenantCss(tenantId);
     }
     if (detail.tenantName) {
       tenantName = detail.tenantName;
@@ -109,10 +110,6 @@
     }
     if (detail.publicToken) {
       publicToken = detail.publicToken;
-    }
-    if (detail.color) {
-      accent = detail.color;
-      document.documentElement.style.setProperty("--widget-primary", accent);
     }
     sessionId = null;
     setStatus(statusEl, `${tenantName}に切り替えました`, false);
@@ -190,8 +187,8 @@
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Tenant-Id": script.dataset.tenantId || tenantId,
-        "X-Widget-Token": script.dataset.publicToken || publicToken,
+        "X-Tenant-Id": tenantId,
+        "X-Widget-Token": publicToken,
       },
       body: JSON.stringify({
         session_id: sessionId,
@@ -321,6 +318,39 @@
     link.rel = "stylesheet";
     link.href = href;
     document.head.appendChild(link);
+  }
+
+  function ensureTenantCss(nextTenantId) {
+    const href = resolveTenantCssUrl(nextTenantId);
+    const existing = document.querySelector('link[data-site-llm-bot-tenant-css="true"]');
+    if (!href) {
+      if (existing) {
+        existing.remove();
+      }
+      return;
+    }
+    if (existing) {
+      if (existing.href !== href) {
+        existing.href = href;
+      }
+      existing.dataset.siteLlmBotTenantId = nextTenantId;
+      return;
+    }
+
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.dataset.siteLlmBotTenantCss = "true";
+    link.dataset.siteLlmBotTenantId = nextTenantId;
+    document.head.appendChild(link);
+  }
+
+  function resolveTenantCssUrl(nextTenantId) {
+    const value = String(nextTenantId || "").trim();
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(value)) {
+      return null;
+    }
+    return new URL(`${encodeURIComponent(value)}.css`, tenantCssBaseUrl).toString();
   }
 
   function resolveApiBase(configuredApiBase) {
