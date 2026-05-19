@@ -115,24 +115,24 @@
             <option
               value="sample-shintairiku"
               data-tenant-name="新大陸"
-              data-color="#155e75"
               data-domain="shintairiku.jp"
+              data-public-token="public_sample_shintairiku"
             >
               新大陸
             </option>
             <option
               value="reform-tamao"
               data-tenant-name="リフォームのタマオ"
-              data-color="#b45309"
               data-domain="reform-tamao.com"
+              data-public-token="public_reform_tamao"
             >
               リフォームのタマオ
             </option>
             <option
               value="more-living"
               data-tenant-name="MORE Living"
-              data-color="#047857"
               data-domain="moreliving.co.jp"
+              data-public-token="public_more_living"
             >
               MORE Living
             </option>
@@ -159,10 +159,10 @@
     </main>
     <script
       id="site-llm-bot-widget"
-      src="https://site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js"
+      src="/static/widget.js"
       data-tenant-id="sample-shintairiku"
       data-tenant-name="新大陸"
-      data-color="#155e75"
+      data-public-token="public_sample_shintairiku"
       data-api-base="__WIDGET_API_BASE__"
     ></script>
     <script>
@@ -180,12 +180,12 @@
           const detail = {
             tenantId: option.value,
             tenantName: option.dataset.tenantName,
-            color: option.dataset.color,
+            publicToken: option.dataset.publicToken,
           };
 
           widgetScript.dataset.tenantId = detail.tenantId;
           widgetScript.dataset.tenantName = detail.tenantName;
-          widgetScript.dataset.color = detail.color;
+          widgetScript.dataset.publicToken = detail.publicToken;
           domain.textContent = option.dataset.domain;
           window.dispatchEvent(new CustomEvent("site-llm-bot:tenant-change", { detail }));
         }

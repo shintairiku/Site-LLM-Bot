@@ -10,6 +10,10 @@ import httpx
 from site_llm_bot.services.session_store import ChatMessage
 
 MAX_RELATED_LINKS = 3
+SAFETY_MESSAGE = (
+    "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
+    " 許可ドメインから取得できる情報では確認できなかったため、正確な案内のためにお問い合わせください。"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +22,15 @@ class RelatedLink:
 
     title: str
     url: str
+
+
+@dataclass(frozen=True, slots=True)
+class SourceInspection:
+    """web_search の実行状況と参照元ドメイン検証結果。"""
+
+    used_web_search: bool
+    related_links: list[RelatedLink]
+    has_disallowed_sources: bool
 
 
 @dataclass(slots=True)
@@ -141,7 +154,6 @@ class OpenAIChatHandler:
 
                 }
             ],
-            # "tool_choice": "auto",
             "tool_choice": "required",
             "include": ["web_search_call.action.sources"],
         }
@@ -168,8 +180,9 @@ class OpenAIChatHandler:
         )
         response.raise_for_status()
         data = response.json()
-        related_links = self._extract_allowed_source_links(data)
-        used_allowed_sources = bool(related_links) if self._search_allowed_domains else True
+        inspection = self._inspect_response_sources(data)
+        related_links = inspection.related_links
+        used_allowed_sources = self._is_source_inspection_allowed(inspection)
         answer = data.get("output_text")
         if isinstance(answer, str) and answer.strip():
             return ChatGenerationResult(
@@ -201,10 +214,7 @@ class OpenAIChatHandler:
             return self._sanitize_answer(answer)
         if used_allowed_sources:
             return self._append_related_links(self._sanitize_answer(answer), related_links or [])
-        return (
-            "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
-            " この内容はサイト内で裏取りできなかったため、正確な案内のためにお問い合わせください。"
-        )
+        return SAFETY_MESSAGE
 
     # UI側で読みやすいよう、Markdown強調やURL・出典表記を落としてプレーンテキストへ寄せる。
     def _sanitize_answer(self, answer: str) -> str:
@@ -230,21 +240,43 @@ class OpenAIChatHandler:
 
     # OpenAIのweb_search結果に含まれる source URL から、許可ドメインのリンクだけを抽出する。
     def _extract_allowed_source_links(self, data: dict[str, Any]) -> list[RelatedLink]:
+        return self._inspect_response_sources(data).related_links
+
+    def _inspect_response_sources(self, data: dict[str, Any]) -> SourceInspection:
         allowed = [domain.lower() for domain in self._search_allowed_domains]
         links: list[RelatedLink] = []
         seen_urls: set[str] = set()
+        has_disallowed_sources = False
+        used_web_search = any(
+            item.get("type") == "web_search_call" for item in data.get("output", [])
+        )
 
         for candidate in self._iter_source_candidates(data):
             url = self._normalize_allowed_source_url(candidate.get("url", ""), allowed)
-            if not url or url in seen_urls:
+            if not url:
+                if allowed:
+                    has_disallowed_sources = True
+                continue
+            if url in seen_urls:
                 continue
 
             title = self._normalize_link_title(candidate.get("title"), url)
             links.append(RelatedLink(title=title, url=url))
             seen_urls.add(url)
-            if len(links) >= MAX_RELATED_LINKS:
-                return links
-        return links
+        return SourceInspection(
+            used_web_search=used_web_search,
+            related_links=links[:MAX_RELATED_LINKS],
+            has_disallowed_sources=has_disallowed_sources,
+        )
+
+    def _is_source_inspection_allowed(self, inspection: SourceInspection) -> bool:
+        if not self._search_allowed_domains:
+            return True
+        return (
+            inspection.used_web_search
+            and bool(inspection.related_links)
+            and not inspection.has_disallowed_sources
+        )
 
     def _iter_source_candidates(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
@@ -257,7 +289,11 @@ class OpenAIChatHandler:
 
         for item in data.get("output", []):
             action = item.get("action") or {}
-            candidates.extend(action.get("sources", []))
+            candidates.extend(
+                source
+                for source in action.get("sources", [])
+                if isinstance(source, dict)
+            )
 
         return candidates
 
@@ -269,7 +305,9 @@ class OpenAIChatHandler:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return None
 
-        host = parsed.netloc.lower()
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return None
         if allowed_domains and not any(
             host == domain or host.endswith(f".{domain}") for domain in allowed_domains
         ):

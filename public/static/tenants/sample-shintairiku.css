@@ -1,0 +1,10 @@
+:root {
+  --widget-primary: #155e75;
+  --widget-primary-strong: #0f4b5e;
+  --widget-primary-accent: #1c7a98;
+  --widget-primary-shadow: rgba(21, 94, 117, 0.28);
+  --widget-text: #10212b;
+  --widget-muted: #667782;
+  --widget-surface: #f3f8f9;
+  --widget-border: #d6e1e5;
+}

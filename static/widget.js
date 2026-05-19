@@ -5,16 +5,16 @@
   }
 
   // 埋め込み script タグの data 属性を起点に、ウィジェット表示に必要な設定値を初期化する。
-  // この値は下の render 相当の処理と、テーマ反映、モック応答表示で参照される。
+  // 見た目は共通 CSS と tenant 別 CSS で管理し、顧客側の data 属性では制御しない。
   const baseUrl = new URL("./", script.src || window.location.href);
-  const cssUrl = new URL("mock-widget.css", baseUrl).toString();
+  const cssUrl = new URL("widget.css", baseUrl).toString();
+  const tenantCssBaseUrl = new URL("tenants/", baseUrl).toString();
   const apiBase = resolveApiBase(
     script.dataset.apiBase
   );
   let tenantId = script.dataset.tenantId || "sample-shintairiku";
   let tenantName = script.dataset.tenantName || "サンプル工務店";
   let publicToken = script.dataset.publicToken || "";
-  let accent = script.dataset.color || "#155e75";
   let sessionId = null;
   const suggestions = [
     "施工エリアを教えてください",
@@ -23,27 +23,27 @@
   ];
 
   ensureCss(cssUrl);
-  document.documentElement.style.setProperty("--widget-primary", accent);
+  ensureTenantCss(tenantId);
 
   // ランチャーボタンと本体パネルを先に構築し、以降の各関数は
   // messagesEl / suggestionsEl / statusEl / textarea を共有してUI更新を行う。
   const launcher = document.createElement("button");
-  launcher.className = "mock-chatbot-launcher";
+  launcher.className = "site-llm-bot-launcher";
   launcher.type = "button";
   launcher.textContent = "AI相談窓口";
 
   const panel = document.createElement("section");
-  panel.className = "mock-chatbot-panel";
+  panel.className = "site-llm-bot-panel";
   panel.innerHTML = `
-    <div class="mock-chatbot-header">
-      <h2 class="mock-chatbot-title">${escapeHtml(tenantName)} AI相談窓口</h2>
+    <div class="site-llm-bot-header">
+      <h2 class="site-llm-bot-title">${escapeHtml(tenantName)} AI相談窓口</h2>
       <p>住まいに関するご質問を受け付けています。API未接続時は自動でモック応答に切り替わります。</p>
-      <button class="mock-chatbot-close" type="button" aria-label="閉じる">×</button>
+      <button class="site-llm-bot-close" type="button" aria-label="閉じる">×</button>
     </div>
-    <div class="mock-chatbot-messages"></div>
-    <div class="mock-chatbot-suggestions"></div>
-    <div class="mock-chatbot-status">待機中</div>
-    <form class="mock-chatbot-form">
+    <div class="site-llm-bot-messages"></div>
+    <div class="site-llm-bot-suggestions"></div>
+    <div class="site-llm-bot-status">待機中</div>
+    <form class="site-llm-bot-form">
       <textarea placeholder="住まいに関するご質問を入力してください"></textarea>
       <button type="submit">送信</button>
     </form>
@@ -52,14 +52,14 @@
   document.body.appendChild(launcher);
   document.body.appendChild(panel);
 
-  const messagesEl = panel.querySelector(".mock-chatbot-messages");
-  const suggestionsEl = panel.querySelector(".mock-chatbot-suggestions");
-  const statusEl = panel.querySelector(".mock-chatbot-status");
-  const closeButton = panel.querySelector(".mock-chatbot-close");
-  const form = panel.querySelector(".mock-chatbot-form");
+  const messagesEl = panel.querySelector(".site-llm-bot-messages");
+  const suggestionsEl = panel.querySelector(".site-llm-bot-suggestions");
+  const statusEl = panel.querySelector(".site-llm-bot-status");
+  const closeButton = panel.querySelector(".site-llm-bot-close");
+  const form = panel.querySelector(".site-llm-bot-form");
   const textarea = form.querySelector("textarea");
   const submitButton = form.querySelector("button");
-  const titleEl = panel.querySelector(".mock-chatbot-title");
+  const titleEl = panel.querySelector(".site-llm-bot-title");
 
   // 初期メッセージは addMessage に集約しておき、
   // 送信時のユーザー発話追加・モック応答追加も同じ導線で処理する。
@@ -102,6 +102,7 @@
     const detail = event.detail || {};
     if (detail.tenantId) {
       tenantId = detail.tenantId;
+      ensureTenantCss(tenantId);
     }
     if (detail.tenantName) {
       tenantName = detail.tenantName;
@@ -110,16 +111,12 @@
     if (detail.publicToken) {
       publicToken = detail.publicToken;
     }
-    if (detail.color) {
-      accent = detail.color;
-      document.documentElement.style.setProperty("--widget-primary", accent);
-    }
     sessionId = null;
     setStatus(statusEl, `${tenantName}に切り替えました`, false);
   });
 
   // 送信処理の中心。入力値検証、ユーザー発話の描画、状態表示更新のあと、
-  // まず API へ問い合わせ、失敗時のみ createMockReply にフォールバックする。
+  // 検証済みのJSON応答を受信し、失敗時のみ createMockReply にフォールバックする。
   form.addEventListener("submit", async function (event) {
     event.preventDefault();
     const text = textarea.value.trim();
@@ -133,12 +130,12 @@
     setStatus(statusEl, "APIへ問い合わせ中...", true);
 
     try {
-      const reply = await requestChatAnswer(text);
-      sessionId = reply.session_id || sessionId;
-      addMessage(messagesEl, "bot", reply.answer);
+      const result = await requestChatMessage(text);
+      sessionId = result.session_id || sessionId;
+      addMessage(messagesEl, "bot", result.answer || "回答を生成できませんでした。");
       setStatus(
         statusEl,
-        reply.source === "openai" ? "OpenAI応答を受信しました" : "デモ応答を受信しました",
+        result.source === "openai" ? "OpenAI応答を受信しました" : "デモ応答を受信しました",
         false
       );
     } catch (error) {
@@ -174,26 +171,25 @@
     return "ありがとうございます。\nこの仮ウィジェットでは、次工程でAI回答に置き換わる位置にモック文章を表示しています。";
   }
 
-  // FastAPI 側の最小ハンドラを呼び出す関数。
-  // UI 側はこの関数から answer/source を受け取り、描画ロジックとは分離している。
-  async function requestChatAnswer(text) {
-    const response = await window.fetch(`${apiBase}/api/chat`, {
+  // チャット応答をJSONで受信する。
+  async function requestChatMessage(text) {
+    const response = await window.fetch(`${apiBase}/v1/chat/message`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Tenant-Id": script.dataset.tenantId || tenantId,
-        "X-Widget-Token": script.dataset.publicToken || publicToken,
+        "X-Tenant-Id": tenantId,
+        "X-Widget-Token": publicToken,
       },
       body: JSON.stringify({
-        tenant_id: script.dataset.tenantId || tenantId,
-        message: text,
-        page_url: window.location.href,
         session_id: sessionId,
+        message: text,
+        metadata: { page_url: window.location.href },
       }),
     });
     if (!response.ok) {
-      throw new Error("chat api request failed");
+      throw new Error(`chat message request failed: ${response.status}`);
     }
+
     return response.json();
   }
 
@@ -216,11 +212,17 @@
   // 初期メッセージ、ユーザー発話、bot 応答のすべてがここを通ることで、
   // DOM 構造とスクロール制御を一か所で保守できる。
   function addMessage(container, role, text) {
-    const node = document.createElement("div");
-    node.className = `mock-chatbot-message ${role}`;
+    const node = createEmptyMessage(container, role);
     appendLinkedText(node, text);
-    container.appendChild(node);
     container.scrollTop = container.scrollHeight;
+    return node;
+  }
+
+  // 空のメッセージ節点をコンテナに追加して返す。
+  function createEmptyMessage(container, role) {
+    const node = document.createElement("div");
+    node.className = `site-llm-bot-message ${role}`;
+    container.appendChild(node);
     return node;
   }
 
@@ -266,6 +268,39 @@
     link.rel = "stylesheet";
     link.href = href;
     document.head.appendChild(link);
+  }
+
+  function ensureTenantCss(nextTenantId) {
+    const href = resolveTenantCssUrl(nextTenantId);
+    const existing = document.querySelector('link[data-site-llm-bot-tenant-css="true"]');
+    if (!href) {
+      if (existing) {
+        existing.remove();
+      }
+      return;
+    }
+    if (existing) {
+      if (existing.href !== href) {
+        existing.href = href;
+      }
+      existing.dataset.siteLlmBotTenantId = nextTenantId;
+      return;
+    }
+
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.dataset.siteLlmBotTenantCss = "true";
+    link.dataset.siteLlmBotTenantId = nextTenantId;
+    document.head.appendChild(link);
+  }
+
+  function resolveTenantCssUrl(nextTenantId) {
+    const value = String(nextTenantId || "").trim();
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(value)) {
+      return null;
+    }
+    return new URL(`${encodeURIComponent(value)}.css`, tenantCssBaseUrl).toString();
   }
 
   function resolveApiBase(configuredApiBase) {

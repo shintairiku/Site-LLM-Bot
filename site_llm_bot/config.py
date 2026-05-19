@@ -62,10 +62,13 @@ class TenantConfig:
 
     tenant_id: str
     display_name: str
-    primary_color: str
     greeting: str
     suggested_questions: list[str]
     allowed_domains: list[str]
+    allowed_origins: list[str] = field(default_factory=list)
+    allowed_origin_patterns: list[str] = field(default_factory=list)
+    public_token: str | None = None
+    status: str = "active"
 
 
 @dataclass(slots=True)
@@ -89,10 +92,13 @@ def load_tenant_settings(path: str) -> TenantSettings:
         tenant = TenantConfig(
             tenant_id=item["tenant_id"],
             display_name=item["display_name"],
-            primary_color=item["primary_color"],
             greeting=item["greeting"],
             suggested_questions=item.get("suggested_questions", []),
             allowed_domains=item.get("allowed_domains", []),
+            allowed_origins=item.get("allowed_origins", []),
+            allowed_origin_patterns=item.get("allowed_origin_patterns", []),
+            public_token=item.get("public_token"),
+            status=item.get("status", "active"),
         )
         tenants[tenant.tenant_id] = tenant
     default_tenant_id = raw.get("default_tenant_id", next(iter(tenants)))
