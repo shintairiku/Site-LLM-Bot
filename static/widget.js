@@ -116,7 +116,7 @@
   });
 
   // 送信処理の中心。入力値検証、ユーザー発話の描画、状態表示更新のあと、
-  // SSE ストリーミングで応答を受信し、失敗時のみ createMockReply にフォールバックする。
+  // 検証済みのJSON応答を受信し、失敗時のみ createMockReply にフォールバックする。
   form.addEventListener("submit", async function (event) {
     event.preventDefault();
     const text = textarea.value.trim();
@@ -129,26 +129,17 @@
     setBusyState(textarea, submitButton, suggestionsEl, true);
     setStatus(statusEl, "APIへ問い合わせ中...", true);
 
-    // ボットメッセージ節点を先に作り、チャンクを逐次追記する。
-    const botNode = createEmptyMessage(messagesEl, "bot");
-
     try {
-      const result = await requestChatStream(text, function (chunk) {
-        appendChunkToMessage(botNode, chunk);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      });
+      const result = await requestChatMessage(text);
       sessionId = result.session_id || sessionId;
+      addMessage(messagesEl, "bot", result.answer || "回答を生成できませんでした。");
       setStatus(
         statusEl,
         result.source === "openai" ? "OpenAI応答を受信しました" : "デモ応答を受信しました",
         false
       );
     } catch (error) {
-      // ストリームが空のまま失敗した場合はモック応答を差し込む。
-      if (!botNode.hasChildNodes()) {
-        appendLinkedText(botNode, createMockReply(text));
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      }
+      addMessage(messagesEl, "bot", createMockReply(text));
       setStatus(statusEl, "API接続に失敗したためモック応答を表示しました", false);
     } finally {
       setBusyState(textarea, submitButton, suggestionsEl, false);
@@ -180,10 +171,9 @@
     return "ありがとうございます。\nこの仮ウィジェットでは、次工程でAI回答に置き換わる位置にモック文章を表示しています。";
   }
 
-  // SSE ストリーミングでチャット応答を受信する。
-  // onChunk(text) をチャンク到着のたびに呼び出し、done イベントの内容を返す。
-  async function requestChatStream(text, onChunk) {
-    const response = await window.fetch(`${apiBase}/v1/chat/stream`, {
+  // チャット応答をJSONで受信する。
+  async function requestChatMessage(text) {
+    const response = await window.fetch(`${apiBase}/v1/chat/message`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -197,44 +187,10 @@
       }),
     });
     if (!response.ok) {
-      throw new Error(`chat stream request failed: ${response.status}`);
+      throw new Error(`chat message request failed: ${response.status}`);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let donePayload = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      // 最後の要素は次回に持ち越す（不完全行の可能性あり）
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) {
-          continue;
-        }
-        let event;
-        try {
-          event = JSON.parse(line.slice(6));
-        } catch {
-          continue;
-        }
-        if (event.type === "chunk") {
-          onChunk(event.text);
-        } else if (event.type === "done") {
-          donePayload = event;
-        } else if (event.type === "error") {
-          throw new Error(event.message || "stream error");
-        }
-      }
-    }
-
-    return donePayload || {};
+    return response.json();
   }
 
   // 送信中の多重送信を防ぎ、入力部品の状態をまとめて切り替える。
@@ -262,18 +218,12 @@
     return node;
   }
 
-  // SSE ストリーミング用。空のメッセージ節点をコンテナに追加して返す。
+  // 空のメッセージ節点をコンテナに追加して返す。
   function createEmptyMessage(container, role) {
     const node = document.createElement("div");
     node.className = `site-llm-bot-message ${role}`;
     container.appendChild(node);
     return node;
-  }
-
-  // ストリーミングチャンクを既存メッセージ節点に追記する。
-  // URL を含む場合はアンカー化しつつ、プレーンテキスト部分は text node として扱う。
-  function appendChunkToMessage(node, chunk) {
-    appendLinkedText(node, chunk);
   }
 
   // 回答内のURLだけをアンカー化する。本文はtext nodeで追加し、HTMLとして解釈しない。

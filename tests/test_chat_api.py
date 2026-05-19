@@ -130,6 +130,7 @@ async def test_chat_api_with_mock_openai() -> None:
         payload = json.loads(request.content.decode("utf-8"))
         assert payload["tools"][0]["type"] == "web_search"
         assert payload["tools"][0]["filters"]["allowed_domains"] == ["shintairiku.jp"]
+        assert payload["tool_choice"] == "required"
         assert payload["include"] == ["web_search_call.action.sources"]
         return httpx.Response(
             200,
@@ -357,6 +358,46 @@ async def test_chat_api_returns_safe_message_when_allowed_domain_source_is_missi
 
 
 @pytest.mark.anyio
+async def test_chat_api_returns_safe_message_when_disallowed_source_is_mixed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "output_text": "許可サイトと外部サイトを混ぜた回答",
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "action": {
+                            "sources": [
+                                {"url": "https://shintairiku.jp/company/"},
+                                {"url": "https://competitor.example.com/article"},
+                            ]
+                        },
+                    }
+                ],
+            },
+        )
+
+    openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(settings=build_settings(), openai_client=openai_client)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            json={"message": "会社の強みを教えてください"},
+            headers=widget_headers(),
+        )
+
+    assert response.status_code == 200
+    assert "許可ドメインから取得できる情報では確認できなかった" in response.json()["answer"]
+    assert "許可サイトと外部サイトを混ぜた回答" not in response.json()["answer"]
+    await openai_client.aclose()
+
+
+@pytest.mark.anyio
 async def test_chat_api_demo_fallback_without_api_key() -> None:
     app = create_app(settings=build_settings(api_key=None))
 
@@ -421,6 +462,8 @@ async def test_v1_chat_message_with_mock_openai() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content.decode("utf-8"))
         assert payload["tools"][0]["filters"]["allowed_domains"] == ["shintairiku.jp"]
+        assert payload["tool_choice"] == "required"
+        assert "stream" not in payload
         return httpx.Response(
             200,
             json={
@@ -631,136 +674,6 @@ async def test_chat_api_rejects_cross_tenant_session_reuse() -> None:
     assert resp_b.json()["detail"] == "session tenant mismatch"
 
 
-@pytest.mark.anyio
-async def test_v1_chat_stream_demo_mode_yields_sse_chunks() -> None:
-    """API キー未設定時にデモテキストが SSE chunk / done イベントとして届く。"""
-    app = create_app(settings=build_settings(api_key=None))
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
-        response = await client.post(
-            "/v1/chat/stream",
-            headers=widget_headers(),
-            json={"message": "施工エリアを教えてください", "metadata": {}},
-        )
-
-    assert response.status_code == 200
-    assert "text/event-stream" in response.headers["content-type"]
-
-    events = _parse_sse_events(response.text)
-    chunk_events = [e for e in events if e.get("type") == "chunk"]
-    done_events = [e for e in events if e.get("type") == "done"]
-
-    assert chunk_events, "chunk イベントが1件以上あること"
-    full_text = "".join(e.get("text", "") for e in chunk_events)
-    assert "デモモード" in full_text
-    assert done_events, "done イベントが1件あること"
-    assert done_events[0]["session_id"]
-    assert done_events[0]["source"] == "demo"
-
-
-@pytest.mark.anyio
-async def test_v1_chat_stream_with_mock_openai() -> None:
-    """モック OpenAI がストリーミング SSE を返すとき、chunk / done イベントが届く。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content.decode("utf-8"))
-        assert payload.get("stream") is True
-        sse_body = "\n".join([
-            'data: {"type": "response.output_item.done", "item": {"type": "web_search_call", "action": {"sources": [{"url": "https://shintairiku.jp/company/"}]}}}',
-            "",
-            'data: {"type": "response.output_text.delta", "delta": "施工エリアは"}',
-            "",
-            'data: {"type": "response.output_text.delta", "delta": "東京都内です。"}',
-            "",
-            'data: {"type": "response.completed", "response": {"output": []}}',
-            "",
-        ])
-        return httpx.Response(
-            200,
-            content=sse_body.encode(),
-            headers={"content-type": "text/event-stream"},
-        )
-
-    openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
-        response = await client.post(
-            "/v1/chat/stream",
-            headers=widget_headers(),
-            json={"message": "施工エリアを教えてください", "metadata": {}},
-        )
-
-    assert response.status_code == 200
-    events = _parse_sse_events(response.text)
-    chunk_events = [e for e in events if e.get("type") == "chunk"]
-    done_events = [e for e in events if e.get("type") == "done"]
-
-    full_text = "".join(e.get("text", "") for e in chunk_events)
-    assert "施工エリア" in full_text
-    assert "shintairiku.jp" in full_text  # 関連リンクが付く
-    assert done_events[0]["source"] == "openai"
-    await openai_client.aclose()
-
-
-@pytest.mark.anyio
-async def test_v1_chat_stream_yields_safety_message_when_no_allowed_sources() -> None:
-    """許可ドメイン以外の source しか返らない場合は safety メッセージが chunk として届く。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        sse_body = "\n".join([
-            'data: {"type": "response.output_item.done", "item": {"type": "web_search_call", "action": {"sources": [{"url": "https://example.com/article"}]}}}',
-            "",
-            'data: {"type": "response.output_text.delta", "delta": "外部情報です"}',
-            "",
-            'data: {"type": "response.completed", "response": {"output": []}}',
-            "",
-        ])
-        return httpx.Response(
-            200,
-            content=sse_body.encode(),
-            headers={"content-type": "text/event-stream"},
-        )
-
-    openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
-        response = await client.post(
-            "/v1/chat/stream",
-            headers=widget_headers(),
-            json={"message": "会社について", "metadata": {}},
-        )
-
-    assert response.status_code == 200
-    events = _parse_sse_events(response.text)
-    chunk_events = [e for e in events if e.get("type") == "chunk"]
-    full_text = "".join(e.get("text", "") for e in chunk_events)
-    assert "対象サイト内で確認できた情報のみ" in full_text
-    await openai_client.aclose()
-
-
-def _parse_sse_events(body: str) -> list[dict]:
-    """SSE レスポンスボディから data フィールドを JSON パースして返す。"""
-    events = []
-    for line in body.splitlines():
-        if line.startswith("data: "):
-            try:
-                events.append(json.loads(line[6:]))
-            except json.JSONDecodeError:
-                pass
-    return events
-
-
 def test_demo_and_static_routes_exist() -> None:
     app = create_app(settings=build_settings(api_key=None))
     paths = {route.path for route in app.routes if hasattr(route, "path")}
@@ -769,7 +682,7 @@ def test_demo_and_static_routes_exist() -> None:
     assert "/v1/widget/config" in paths
     assert "/v1/chat/session" in paths
     assert "/v1/chat/message" in paths
-    assert "/v1/chat/stream" in paths
+    assert "/v1/chat/stream" not in paths
 
 
 def test_distribution_widget_assets_exist() -> None:
@@ -785,6 +698,10 @@ def test_distribution_widget_assets_exist() -> None:
     assert 'new URL("widget.css", baseUrl)' in widget_js
     assert 'new URL("tenants/", baseUrl)' in widget_js
     assert "ensureTenantCss(tenantId)" in widget_js
+    assert "/v1/chat/message" in widget_js
+    assert "/v1/chat/stream" not in widget_js
+    assert "requestChatMessage" in widget_js
+    assert "requestChatStream" not in widget_js
     assert "dataset.color" not in widget_js
     assert 'setProperty("--widget-primary"' not in widget_js
     assert "--widget-primary-accent" in widget_css
