@@ -150,7 +150,7 @@ class OpenAIChatHandler:
                     "filters": {
                         "allowed_domains": self._search_allowed_domains,
                     },
-                    "search_context_size": "medium",
+                    "search_context_size": "high",
 
                 }
             ],
