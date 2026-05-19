@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 import re
-from typing import Any, AsyncGenerator
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -11,6 +10,10 @@ import httpx
 from site_llm_bot.services.session_store import ChatMessage
 
 MAX_RELATED_LINKS = 3
+SAFETY_MESSAGE = (
+    "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
+    " 許可ドメインから取得できる情報では確認できなかったため、正確な案内のためにお問い合わせください。"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +22,15 @@ class RelatedLink:
 
     title: str
     url: str
+
+
+@dataclass(frozen=True, slots=True)
+class SourceInspection:
+    """web_search の実行状況と参照元ドメイン検証結果。"""
+
+    used_web_search: bool
+    related_links: list[RelatedLink]
+    has_disallowed_sources: bool
 
 
 @dataclass(slots=True)
@@ -45,111 +57,6 @@ class OpenAIChatHandler:
         self._search_allowed_domains = search_allowed_domains or []
         self._timeout_seconds = timeout_seconds
         self._client = client
-
-    async def generate_answer_stream(
-        self,
-        message: str,
-        page_url: str | None = None,
-        history: list[ChatMessage] | None = None,
-    ) -> AsyncGenerator[str, None]:
-        """ユーザー入力に対する LLM 応答をテキストチャンクとして逐次 yield する。
-
-        OpenAI Responses API のストリーミングを使い、web_search 完了後に
-        テキストデルタを yield する。API キー未設定時はデモテキストをチャンク送信する。
-        """
-        return self._stream_demo(message, page_url) if not self._api_key else self._stream_openai(message, page_url, history or [])
-
-    async def _stream_demo(
-        self,
-        message: str,
-        page_url: str | None,
-    ) -> AsyncGenerator[str, None]:
-        demo_text = (
-            "現在はデモモードです。"
-            f" 受信した質問: {message}"
-            + (f" / 閲覧ページ: {page_url}" if page_url else "")
-        )
-        for word in demo_text.split(" "):
-            yield word + " "
-
-    async def _stream_openai(
-        self,
-        message: str,
-        page_url: str | None,
-        history: list[ChatMessage],
-    ) -> AsyncGenerator[str, None]:
-        payload = self._build_payload(message=message, page_url=page_url, history=history)
-        payload["stream"] = True
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-
-        owns_client = self._client is None
-        client: httpx.AsyncClient = self._client or httpx.AsyncClient(timeout=self._timeout_seconds)
-
-        try:
-            async with client.stream(
-                "POST",
-                "https://api.openai.com/v1/responses",
-                headers=headers,
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-
-                related_links: list[RelatedLink] = []
-                allowed_checked = False
-                safety_triggered = False
-
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    raw = line[6:]
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        event = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-
-                    event_type = event.get("type", "")
-
-                    if event_type == "response.output_item.done":
-                        item = event.get("item", {})
-                        if item.get("type") == "web_search_call":
-                            allowed_checked = True
-                            data = {"output": [item]}
-                            related_links = self._extract_allowed_source_links(data)
-                            used = bool(related_links) if self._search_allowed_domains else True
-                            if not used and self._search_allowed_domains:
-                                safety_triggered = True
-                                yield (
-                                    "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
-                                    " この内容はサイト内で裏取りできなかったため、正確な案内のためにお問い合わせください。"
-                                )
-                                return
-
-                    elif event_type == "response.output_text.delta" and not safety_triggered:
-                        delta = event.get("delta", "")
-                        if delta:
-                            yield delta
-
-                    elif event_type == "response.completed" and not safety_triggered:
-                        if not allowed_checked:
-                            # web_search が使われなかった場合は completed から sources を取得する
-                            completed = event.get("response", {})
-                            data = {"output": completed.get("output", [])}
-                            related_links = self._extract_allowed_source_links(data)
-
-                        if related_links:
-                            links_text = "\n".join(
-                                f"【{link.title}】\n- {link.url}"
-                                for link in related_links[:MAX_RELATED_LINKS]
-                            )
-                            yield f"\n\n関連リンク:\n{links_text}"
-        finally:
-            if owns_client:
-                await client.aclose()
 
     async def generate_answer(
         self,
@@ -247,7 +154,6 @@ class OpenAIChatHandler:
 
                 }
             ],
-            # "tool_choice": "auto",
             "tool_choice": "required",
             "include": ["web_search_call.action.sources"],
         }
@@ -274,8 +180,9 @@ class OpenAIChatHandler:
         )
         response.raise_for_status()
         data = response.json()
-        related_links = self._extract_allowed_source_links(data)
-        used_allowed_sources = bool(related_links) if self._search_allowed_domains else True
+        inspection = self._inspect_response_sources(data)
+        related_links = inspection.related_links
+        used_allowed_sources = self._is_source_inspection_allowed(inspection)
         answer = data.get("output_text")
         if isinstance(answer, str) and answer.strip():
             return ChatGenerationResult(
@@ -307,10 +214,7 @@ class OpenAIChatHandler:
             return self._sanitize_answer(answer)
         if used_allowed_sources:
             return self._append_related_links(self._sanitize_answer(answer), related_links or [])
-        return (
-            "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
-            " この内容はサイト内で裏取りできなかったため、正確な案内のためにお問い合わせください。"
-        )
+        return SAFETY_MESSAGE
 
     # UI側で読みやすいよう、Markdown強調やURL・出典表記を落としてプレーンテキストへ寄せる。
     def _sanitize_answer(self, answer: str) -> str:
@@ -336,21 +240,43 @@ class OpenAIChatHandler:
 
     # OpenAIのweb_search結果に含まれる source URL から、許可ドメインのリンクだけを抽出する。
     def _extract_allowed_source_links(self, data: dict[str, Any]) -> list[RelatedLink]:
+        return self._inspect_response_sources(data).related_links
+
+    def _inspect_response_sources(self, data: dict[str, Any]) -> SourceInspection:
         allowed = [domain.lower() for domain in self._search_allowed_domains]
         links: list[RelatedLink] = []
         seen_urls: set[str] = set()
+        has_disallowed_sources = False
+        used_web_search = any(
+            item.get("type") == "web_search_call" for item in data.get("output", [])
+        )
 
         for candidate in self._iter_source_candidates(data):
             url = self._normalize_allowed_source_url(candidate.get("url", ""), allowed)
-            if not url or url in seen_urls:
+            if not url:
+                if allowed:
+                    has_disallowed_sources = True
+                continue
+            if url in seen_urls:
                 continue
 
             title = self._normalize_link_title(candidate.get("title"), url)
             links.append(RelatedLink(title=title, url=url))
             seen_urls.add(url)
-            if len(links) >= MAX_RELATED_LINKS:
-                return links
-        return links
+        return SourceInspection(
+            used_web_search=used_web_search,
+            related_links=links[:MAX_RELATED_LINKS],
+            has_disallowed_sources=has_disallowed_sources,
+        )
+
+    def _is_source_inspection_allowed(self, inspection: SourceInspection) -> bool:
+        if not self._search_allowed_domains:
+            return True
+        return (
+            inspection.used_web_search
+            and bool(inspection.related_links)
+            and not inspection.has_disallowed_sources
+        )
 
     def _iter_source_candidates(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
@@ -363,7 +289,11 @@ class OpenAIChatHandler:
 
         for item in data.get("output", []):
             action = item.get("action") or {}
-            candidates.extend(action.get("sources", []))
+            candidates.extend(
+                source
+                for source in action.get("sources", [])
+                if isinstance(source, dict)
+            )
 
         return candidates
 
@@ -375,7 +305,9 @@ class OpenAIChatHandler:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return None
 
-        host = parsed.netloc.lower()
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return None
         if allowed_domains and not any(
             host == domain or host.endswith(f".{domain}") for domain in allowed_domains
         ):

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from html import escape
-import json
 from pathlib import Path
 import re
-from typing import AsyncGenerator
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -151,7 +149,7 @@ def create_app(
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
         x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
     ) -> ChatResponse:
-        """本番系のメッセージ送信API。SSE化前の暫定JSON応答。"""
+        """本番系のメッセージ送信API。検証済みの回答をJSONで返す。"""
         origin = http_request.headers.get("origin")
         tenant = authenticate_widget_request(
             settings=app_settings,
@@ -169,78 +167,6 @@ def create_app(
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
             origin=origin,
-        )
-
-    @app.post("/v1/chat/stream")
-    async def chat_stream(
-        chat_request: ChatMessageRequest,
-        http_request: Request,
-        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
-        x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
-    ) -> StreamingResponse:
-        """SSE ストリーミングでチャット応答を逐次返す本番系エンドポイント。"""
-        origin = http_request.headers.get("origin")
-        tenant = authenticate_widget_request(
-            settings=app_settings,
-            request_tenant_id=None,
-            header_tenant_id=x_tenant_id,
-            widget_token=x_widget_token,
-            origin=origin,
-        )
-
-        normalized_message = chat_request.message.strip()
-        if not normalized_message:
-            raise HTTPException(status_code=400, detail="message is required")
-
-        try:
-            session = session_store.get_or_create(
-                chat_request.session_id,
-                tenant_id=tenant.tenant_id,
-                origin=origin,
-            )
-        except TenantSessionMismatch as exc:
-            raise HTTPException(status_code=403, detail="session tenant mismatch") from exc
-
-        history = session_store.history(session.session_id, limit=app_settings.max_history_messages)
-        session_store.append_message(session.session_id, "user", normalized_message)
-
-        chat_handler = OpenAIChatHandler(
-            api_key=app_settings.openai_api_key,
-            model=app_settings.openai_model,
-            search_allowed_domains=tenant.allowed_domains,
-            timeout_seconds=app_settings.openai_timeout_seconds,
-            client=openai_client,
-        )
-
-        async def event_stream() -> AsyncGenerator[str, None]:
-            full_text = ""
-            try:
-                async for chunk in await chat_handler.generate_answer_stream(
-                    message=normalized_message,
-                    page_url=chat_request.metadata.page_url,
-                    history=history,
-                ):
-                    full_text += chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': chunk}, ensure_ascii=False)}\n\n"
-            except httpx.HTTPStatusError as exc:
-                detail = exc.response.text if exc.response is not None else str(exc)
-                yield f"data: {json.dumps({'type': 'error', 'message': detail}, ensure_ascii=False)}\n\n"
-                return
-            except httpx.HTTPError as exc:
-                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)}, ensure_ascii=False)}\n\n"
-                return
-
-            session_store.append_message(session.session_id, "assistant", full_text)
-            source = "openai" if app_settings.openai_api_key else "demo"
-            yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id, 'source': source}, ensure_ascii=False)}\n\n"
-
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
         )
 
     @app.post("/api/chat", response_model=ChatResponse)
