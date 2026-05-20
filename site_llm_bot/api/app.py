@@ -69,6 +69,7 @@ class ChatMessageRequest(BaseModel):
 def create_app(
     settings: Settings | None = None,
     openai_client: httpx.AsyncClient | None = None,
+    page_fetch_client: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
@@ -163,6 +164,7 @@ def create_app(
             session_store=session_store,
             tenant=tenant,
             openai_client=openai_client,
+            page_fetch_client=page_fetch_client,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
@@ -193,6 +195,7 @@ def create_app(
             session_store=session_store,
             tenant=tenant,
             openai_client=openai_client,
+            page_fetch_client=page_fetch_client,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.page_url,
@@ -208,6 +211,7 @@ async def generate_chat_response(
     session_store: InMemorySessionStore,
     tenant: TenantConfig,
     openai_client: httpx.AsyncClient | None,
+    page_fetch_client: httpx.AsyncClient | None,
     session_id: str | None,
     message: str,
     page_url: str | None,
@@ -241,6 +245,7 @@ async def generate_chat_response(
         search_allowed_domains=tenant.allowed_domains,
         timeout_seconds=settings.openai_timeout_seconds,
         client=openai_client,
+        page_fetch_client=page_fetch_client,
     )
 
     try:

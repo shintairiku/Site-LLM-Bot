@@ -15,6 +15,7 @@ from site_llm_bot.api.app import create_app
 from site_llm_bot.config import Settings, TenantConfig, load_tenant_settings
 from site_llm_bot.services.session_store import ChatMessage
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
+from site_llm_bot.services.web_retrieval import RankedChunk, extract_readable_html, rank_chunks
 
 
 @pytest.fixture
@@ -248,6 +249,139 @@ def test_openai_handler_formats_assistant_history_as_output_text() -> None:
 
     assert payload["input"][1]["content"][0]["type"] == "input_text"
     assert payload["input"][2]["content"][0]["type"] == "output_text"
+
+
+def test_web_retrieval_extracts_readable_text_without_navigation() -> None:
+    title, text = extract_readable_html(
+        """
+        <html>
+          <head>
+            <title>施工エリア | サンプル工務店</title>
+            <meta name="description" content="東京都内のリフォームに対応しています。">
+          </head>
+          <body>
+            <nav>トップ 会社情報 お問い合わせ</nav>
+            <main>
+              <h1>施工エリア</h1>
+              <p>施工エリアは東京都内を中心に、近隣エリアもご相談いただけます。</p>
+            </main>
+            <footer>フッターリンク</footer>
+          </body>
+        </html>
+        """
+    )
+
+    assert title == "施工エリア | サンプル工務店"
+    assert "東京都内のリフォーム" in text
+    assert "施工エリアは東京都内" in text
+    assert "トップ 会社情報" not in text
+    assert "フッターリンク" not in text
+
+
+def test_web_retrieval_ranks_bm25_and_regex_boosted_chunks() -> None:
+    ranked = rank_chunks(
+        "最新の施工事例を教えてください",
+        [
+            RankedChunk(
+                title="会社情報",
+                url="https://shintairiku.jp/company/",
+                text="会社概要、所在地、代表メッセージを掲載しています。",
+                score=0.0,
+            ),
+            RankedChunk(
+                title="施工事例",
+                url="https://shintairiku.jp/works/",
+                text="最新の施工事例です。2026年4月に公開したリフォーム実績を紹介します。",
+                score=0.0,
+            ),
+        ],
+        top_k=1,
+    )
+
+    assert ranked[0].url == "https://shintairiku.jp/works/"
+
+
+@pytest.mark.anyio
+async def test_openai_handler_uses_retrieved_page_chunks_for_final_answer() -> None:
+    openai_payloads: list[dict[str, object]] = []
+
+    def openai_handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        openai_payloads.append(payload)
+        if "tools" in payload:
+            developer_text = payload["input"][0]["content"][0]["text"]
+            assert "site:shintairiku.jp 施工エリア 対応エリア" in developer_text
+            return httpx.Response(
+                200,
+                json={
+                    "output_text": "候補URLを確認しました。",
+                    "output": [
+                        {
+                            "type": "web_search_call",
+                            "action": {
+                                "sources": [
+                                    {
+                                        "title": "施工エリア | サンプル工務店",
+                                        "url": "https://shintairiku.jp/area/",
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                },
+            )
+
+        final_prompt = payload["input"][-1]["content"][0]["text"]
+        assert "サイト内検索で取得した根拠抜粋" in final_prompt
+        assert "施工エリアは東京都内を中心" in final_prompt
+        assert "tools" not in payload
+        return httpx.Response(
+            200,
+            json={"output_text": "施工エリアは東京都内を中心に対応しています。"},
+        )
+
+    def page_handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://shintairiku.jp/area/"
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text="""
+            <html>
+              <head><title>施工エリア | サンプル工務店</title></head>
+              <body>
+                <nav>トップ 会社情報 お問い合わせ</nav>
+                <main>
+                  <h1>施工エリア</h1>
+                  <p>施工エリアは東京都内を中心に対応しています。</p>
+                  <p>住宅リフォーム、外壁塗装、水まわり改修についてご相談いただけます。</p>
+                  <p>近隣エリアも現地状況により対応可能です。</p>
+                </main>
+              </body>
+            </html>
+            """,
+        )
+
+    openai_client = httpx.AsyncClient(transport=httpx.MockTransport(openai_handler))
+    page_fetch_client = httpx.AsyncClient(transport=httpx.MockTransport(page_handler))
+    handler = OpenAIChatHandler(
+        api_key="test-key",
+        model="gpt-5.4-mini",
+        search_allowed_domains=["shintairiku.jp"],
+        client=openai_client,
+        page_fetch_client=page_fetch_client,
+    )
+
+    result = await handler.generate_answer("施工エリアを教えてください")
+
+    assert result.used_allowed_sources is True
+    assert "施工エリアは東京都内" in result.answer
+    assert "関連リンク:" in result.answer
+    assert "https://shintairiku.jp/area/" in result.answer
+    assert len(openai_payloads) == 2
+    assert "tools" in openai_payloads[0]
+    assert "tools" not in openai_payloads[1]
+    await openai_client.aclose()
+    await page_fetch_client.aclose()
 
 
 def test_openai_handler_sanitizes_markdown_and_source_links() -> None:
