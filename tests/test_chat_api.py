@@ -118,10 +118,12 @@ def test_settings_reads_widget_api_base_from_env(
     )
     monkeypatch.setenv("TENANT_CONFIG_PATH", str(tenant_config))
     monkeypatch.setenv("WIDGET_API_BASE", "https://dev-backend.example.com/")
+    monkeypatch.delenv("OPENAI_TIMEOUT_SECONDS", raising=False)
 
     settings = Settings.from_env()
 
     assert settings.widget_api_base == "https://dev-backend.example.com"
+    assert settings.openai_timeout_seconds == 90.0
 
 
 @pytest.mark.anyio
@@ -355,6 +357,29 @@ async def test_chat_api_returns_safe_message_when_allowed_domain_source_is_missi
 
     assert response.status_code == 200
     assert "対象サイト内で確認できた情報のみ" in response.json()["answer"]
+    await openai_client.aclose()
+
+
+@pytest.mark.anyio
+async def test_chat_api_returns_gateway_timeout_when_openai_times_out() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("request timed out", request=request)
+
+    openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(settings=build_settings(), openai_client=openai_client)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            json={"message": "会社の強みを教えてください"},
+            headers=widget_headers(),
+        )
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "OpenAI request timed out: request timed out"
     await openai_client.aclose()
 
 
