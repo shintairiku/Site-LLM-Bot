@@ -1,0 +1,354 @@
+{
+  "id": "resp_06938d33a63d422c006a0cb8c02f288193bb01265cb21fdc19",
+  "object": "response",
+  "created_at": 1779218624,
+  "status": "completed",
+  "background": false,
+  "billing": {
+    "payer": "openai"
+  },
+  "completed_at": 1779218646,
+  "error": null,
+  "frequency_penalty": 0.0,
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "model": "gpt-5.5-2026-04-23",
+  "moderation": null,
+  "output": [
+    {
+      "id": "ws_06938d33a63d422c006a0cb8c1ab8481939975127cac0c5891",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "queries": [
+          "site:reform-tamao.com 施工事例 最新 リフォーム"
+        ],
+        "query": "site:reform-tamao.com 施工事例 最新 リフォーム",
+        "sources": [
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/3411.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9530.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9504.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9567.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9848.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/10277.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9428.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/8953.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/1126.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/8616.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/10088.html"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rs_06938d33a63d422c006a0cb8c2e9bc8193bdb088cc66cf6ebf",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "ws_06938d33a63d422c006a0cb8c3ea9881938085b0758ce45113",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "open_page",
+        "url": "https://www.reform-tamao.com/"
+      }
+    },
+    {
+      "id": "rs_06938d33a63d422c006a0cb8c505e88193bc2293c8c835ca0f",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "ws_06938d33a63d422c006a0cb8c5673c81938cc4aac3d475fa18",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "open_page"
+      }
+    },
+    {
+      "id": "rs_06938d33a63d422c006a0cb8c67bd8819385b15d533801de44",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "ws_06938d33a63d422c006a0cb8c6e448819389229ac597b438df",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "open_page"
+      }
+    },
+    {
+      "id": "rs_06938d33a63d422c006a0cb8c828b481939d87d4ca2892b6dc",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "ws_06938d33a63d422c006a0cb8c877e48193a4571c83de243b9d",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "queries": [
+          "site:reform-tamao.com/works/14508.html",
+          "site:reform-tamao.com/works/14454.html",
+          "site:reform-tamao.com/works/14414.html"
+        ],
+        "query": "site:reform-tamao.com/works/14508.html",
+        "sources": [
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/3494.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/10130.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-parts/exterior"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/12129.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-building/house"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-parts/interior"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/company"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/toilet"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/bathroom"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/sitemap/"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rs_06938d33a63d422c006a0cb8c9ecdc81938bc94e3ba0b3652a",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "ws_06938d33a63d422c006a0cb8cbadfc819385c18937e813169c",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "queries": [
+          "site:reform-tamao.com/works \"タカラ エーデル\" \"Ｋ様邸\"",
+          "site:reform-tamao.com/works \"三菱 エコキュート\" \"諫早市\" \"Ｋ様\"",
+          "site:reform-tamao.com/works \"Panasonic\" \"長崎市\" \"Ｙ様\" \"トイレリフォーム\""
+        ],
+        "query": "site:reform-tamao.com/works \"タカラ エーデル\" \"Ｋ様邸\"",
+        "sources": [
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-parts/toilet"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/toilet"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-building/house"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-parts/toilet/page/4"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-parts/interior"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-parts/water-heater"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-parts/toilet/page/2"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works-building/house/page/5"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/isahaya"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/togitsu"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rs_06938d33a63d422c006a0cb8ce822c81938d72f54987a3ffd8",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "ws_06938d33a63d422c006a0cb8ceaa64819393a33586697a84a0",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "open_page",
+        "url": "https://www.reform-tamao.com/works"
+      }
+    },
+    {
+      "id": "rs_06938d33a63d422c006a0cb8cfac84819382b22c04e23f6595",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "msg_06938d33a63d422c006a0cb8d465108193af44c2d2c126e19b",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [
+            {
+              "type": "url_citation",
+              "end_index": 110,
+              "start_index": 36,
+              "title": "〖施工事例一覧〗 長崎市・諫早市・長与町・時津町のリフォーム専門店〖リフォームのタマオ〗",
+              "url": "https://www.reform-tamao.com/works?utm_source=openai"
+            }
+          ],
+          "logprobs": [],
+          "text": "施工事例一覧の「最新の施工事例」欄に掲載されている上位3件は、以下です。([reform-tamao.com](https://www.reform-tamao.com/works?utm_source=openai))\n\n1. **長崎｜キッチンリフォーム｜タカラ エーデル｜K様邸**  \n   - エリア：長崎県  \n   - お客様：I様／K様邸表記  \n   - カテゴリ：キッチン\n\n2. **長崎｜諫早市｜エコキュート取替｜三菱 エコキュート**  \n   - エリア：諫早市  \n   - お客様：K様  \n   - カテゴリ：給湯器\n\n3. **長崎｜長崎市｜トイレリフォーム｜Panasonic**  \n   - エリア：長崎市  \n   - お客様：Y様  \n   - カテゴリ：トイレ"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0.0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "24h",
+  "reasoning": {
+    "effort": "medium",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "required",
+  "tools": [
+    {
+      "type": "web_search",
+      "filters": {
+        "allowed_domains": [
+          "reform-tamao.com"
+        ]
+      },
+      "return_token_budget": "default",
+      "search_context_size": "high",
+      "user_location": {
+        "type": "approximate",
+        "city": null,
+        "country": "US",
+        "region": null,
+        "timezone": null
+      }
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 37757,
+    "input_tokens_details": {
+      "cached_tokens": 3968
+    },
+    "output_tokens": 1143,
+    "output_tokens_details": {
+      "reasoning_tokens": 931
+    },
+    "total_tokens": 38900
+  },
+  "user": null,
+  "metadata": {}
+}
