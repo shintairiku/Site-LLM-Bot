@@ -46,7 +46,7 @@ class Settings:
             openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini"),
             app_host=os.getenv("APP_HOST", "127.0.0.1"),
             app_port=int(os.getenv("APP_PORT", "8000")),
-            openai_timeout_seconds=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
+            openai_timeout_seconds=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "90")),
             session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", "1800")),
             max_history_messages=int(os.getenv("MAX_HISTORY_MESSAGES", "6")),
             tenant_config_path=tenant_config_path,

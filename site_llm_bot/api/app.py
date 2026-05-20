@@ -252,8 +252,12 @@ async def generate_chat_response(
     except httpx.HTTPStatusError as exc:
         detail = exc.response.text if exc.response is not None else str(exc)
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {detail}") from exc
+    except httpx.TimeoutException as exc:
+        detail = str(exc) or exc.__class__.__name__
+        raise HTTPException(status_code=504, detail=f"OpenAI request timed out: {detail}") from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"OpenAI request failed: {exc}") from exc
+        detail = str(exc) or exc.__class__.__name__
+        raise HTTPException(status_code=502, detail=f"OpenAI request failed: {detail}") from exc
 
     session_store.append_message(session.session_id, "assistant", result.answer)
     source = "openai" if settings.openai_api_key else "demo"

@@ -37,7 +37,7 @@
   panel.innerHTML = `
     <div class="mock-chatbot-header">
       <h2 class="mock-chatbot-title">${escapeHtml(tenantName)} AI相談窓口</h2>
-      <p>住まいに関するご質問を受け付けています。API未接続時は自動でモック応答に切り替わります。</p>
+      <p>住まいに関するご質問を受け付けています。お気軽にご相談ください。</p>
       <button class="mock-chatbot-close" type="button" aria-label="閉じる">×</button>
     </div>
     <div class="mock-chatbot-messages"></div>
@@ -130,7 +130,7 @@
     textarea.value = "";
     addMessage(messagesEl, "user", text);
     setBusyState(textarea, submitButton, suggestionsEl, true);
-    setStatus(statusEl, "APIへ問い合わせ中...", true);
+    setStatus(statusEl, "回答を準備しています...", true);
 
     try {
       const reply = await requestChatAnswer(text);
@@ -138,12 +138,12 @@
       addMessage(messagesEl, "bot", reply.answer);
       setStatus(
         statusEl,
-        reply.source === "openai" ? "OpenAI応答を受信しました" : "デモ応答を受信しました",
+        "回答を表示しました",
         false
       );
     } catch (error) {
       addMessage(messagesEl, "bot", createMockReply(text));
-      setStatus(statusEl, "API接続に失敗したためモック応答を表示しました", false);
+      setStatus(statusEl, "ただいま詳しい回答を取得できないため、参考情報を表示しています", false);
     } finally {
       setBusyState(textarea, submitButton, suggestionsEl, false);
       textarea.focus();
@@ -163,15 +163,15 @@
   // 将来は API 応答がない場合のフォールバック文言生成にも流用しやすい。
   function createMockReply(text) {
     if (text.includes("施工") || text.includes("エリア")) {
-      return "施工エリアに関するご質問ですね。\n現在の仮ウィジェットでは、対象地域の案内文をここに表示する想定です。";
+      return "施工エリアに関するご質問ですね。\n対応地域の目安を確認し、担当者からご案内できる内容をお伝えします。";
     }
     if (text.includes("リフォーム")) {
-      return "リフォーム相談にも対応する想定です。\n詳細は次工程でAPI接続後にサイト情報を参照して返答します。";
+      return "リフォームのご相談にも対応しています。\nご希望の内容や建物の状況をお聞かせください。";
     }
     if (text.includes("相談") || text.includes("流れ")) {
-      return "ご相談の流れをご案内する想定です。\n仮実装では、初回相談 -> ヒアリング -> ご提案という導線を表示しています。";
+      return "ご相談の流れは、初回相談、ヒアリング、ご提案の順で進みます。\n気になる点からお気軽にご相談ください。";
     }
-    return "ありがとうございます。\nこの仮ウィジェットでは、次工程でAI回答に置き換わる位置にモック文章を表示しています。";
+    return "ありがとうございます。\n内容を確認し、住まいに関するご相談としてご案内します。";
   }
 
   // FastAPI 側の最小ハンドラを呼び出す関数。

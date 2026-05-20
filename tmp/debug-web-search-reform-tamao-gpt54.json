@@ -1,0 +1,183 @@
+{
+  "id": "resp_03167b2ebb39052e006a0d23856cf8819bafce89902f330452",
+  "object": "response",
+  "created_at": 1779245957,
+  "status": "completed",
+  "background": false,
+  "billing": {
+    "payer": "openai"
+  },
+  "completed_at": 1779245966,
+  "error": null,
+  "frequency_penalty": 0.0,
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "model": "gpt-5.4-2026-03-05",
+  "moderation": null,
+  "output": [
+    {
+      "id": "ws_03167b2ebb39052e006a0d23866174819bac6668965c76171d",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "queries": [
+          "site:reform-tamao.com 最新 施工事例",
+          "site:reform-tamao.com 施工事例 reform tamao"
+        ],
+        "query": "site:reform-tamao.com 最新 施工事例",
+        "sources": [
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/5059.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9530.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/8616.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9567.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/12223.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/3437.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9504.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/10088.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/980.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9848.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/10130.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/12404.html"
+          }
+        ]
+      }
+    },
+    {
+      "id": "msg_03167b2ebb39052e006a0d2387ef24819b83566fb1167c4e6b",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [
+            {
+              "type": "url_citation",
+              "end_index": 174,
+              "start_index": 90,
+              "title": "諫早市｜キッチンリフォーム｜浴室リフォーム｜洗面台取替｜リフォームのタマオ",
+              "url": "https://www.reform-tamao.com/works/9530.html?utm_source=openai"
+            },
+            {
+              "type": "url_citation",
+              "end_index": 393,
+              "start_index": 309,
+              "title": "諫早市｜キッチンリフォーム｜浴室リフォーム｜洗面台取替｜リフォームのタマオ",
+              "url": "https://www.reform-tamao.com/works/9530.html?utm_source=openai"
+            },
+            {
+              "type": "url_citation",
+              "end_index": 608,
+              "start_index": 524,
+              "title": "諫早市｜エコキュート取替｜給湯器取替｜リフォームのタマオ",
+              "url": "https://www.reform-tamao.com/works/9567.html?utm_source=openai"
+            },
+            {
+              "type": "url_citation",
+              "end_index": 829,
+              "start_index": 745,
+              "title": "長与町｜浴室リフォーム｜洗面台取替｜リフォームのタマオ",
+              "url": "https://www.reform-tamao.com/works/9504.html?utm_source=openai"
+            }
+          ],
+          "logprobs": [],
+          "text": "リフォームのタマオのサイトで確認できた、**最新掲載と思われる施工事例3件**です。  \n※検索結果上ではいずれも **2026年4月7日掲載** と確認できる事例が最新でした。 ([reform-tamao.com](https://www.reform-tamao.com/works/9530.html?utm_source=openai))\n\n1. **諫早市｜浴室キッチン施工事例｜クリナップ ラクヴィア／ラクエラ**  \n   - 施工エリア：諫早市  \n   - 内容：キッチンリフォーム、浴室リフォーム、押入れ床張替、障子・襖張替 など  \n   - 費用：約399万円  \n   - 工期：18日間 ([reform-tamao.com](https://www.reform-tamao.com/works/9530.html?utm_source=openai))\n\n2. **諫早市｜エコキュート施工事例｜日立 エコキュート**  \n   - 施工エリア：諫早市  \n   - 内容：日立エコキュート370Lへの取替、給水給湯工事、電気工事、追い炊き接続工事 など  \n   - 費用：約52万円  \n   - 工期：半日 ([reform-tamao.com](https://www.reform-tamao.com/works/9567.html?utm_source=openai))\n\n3. **長与町｜浴室施工事例｜クリナップ ラクヴィア**  \n   - 施工エリア：長与町  \n   - 内容：浴室リフォーム、洗面台取替、床CF貼替、クロス貼替、キャビネット取付、エコキュート取替 など  \n   - 費用：約207万円  \n   - 工期：7日間 ([reform-tamao.com](https://www.reform-tamao.com/works/9504.html?utm_source=openai))\n\n必要でしたら次に、  \n**「水まわりだけで最新3件」** や **「長崎市の事例だけ」** に絞ってご案内できます。"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0.0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "in_memory",
+  "reasoning": {
+    "effort": "none",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "required",
+  "tools": [
+    {
+      "type": "web_search",
+      "filters": {
+        "allowed_domains": [
+          "reform-tamao.com"
+        ]
+      },
+      "return_token_budget": "default",
+      "search_context_size": "high",
+      "user_location": {
+        "type": "approximate",
+        "city": null,
+        "country": "US",
+        "region": null,
+        "timezone": null
+      }
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 8300,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 509,
+    "output_tokens_details": {
+      "reasoning_tokens": 54
+    },
+    "total_tokens": 8809
+  },
+  "user": null,
+  "metadata": {}
+}
