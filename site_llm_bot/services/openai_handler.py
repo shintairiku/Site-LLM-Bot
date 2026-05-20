@@ -157,6 +157,7 @@ class OpenAIChatHandler:
             ],
             "tool_choice": "required",
             "include": ["web_search_call.action.sources"],
+            "reasoning": {"effort": "medium"},
         }
         input_messages[0]["content"][0]["text"] = developer_instruction
         return payload

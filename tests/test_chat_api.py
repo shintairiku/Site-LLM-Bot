@@ -132,6 +132,7 @@ async def test_chat_api_with_mock_openai() -> None:
         assert payload["tools"][0]["filters"]["allowed_domains"] == ["shintairiku.jp"]
         assert payload["tool_choice"] == "required"
         assert payload["include"] == ["web_search_call.action.sources"]
+        assert payload["reasoning"] == {"effort": "medium"}
         return httpx.Response(
             200,
             json={
@@ -463,6 +464,7 @@ async def test_v1_chat_message_with_mock_openai() -> None:
         payload = json.loads(request.content.decode("utf-8"))
         assert payload["tools"][0]["filters"]["allowed_domains"] == ["shintairiku.jp"]
         assert payload["tool_choice"] == "required"
+        assert payload["reasoning"] == {"effort": "medium"}
         assert "stream" not in payload
         return httpx.Response(
             200,
