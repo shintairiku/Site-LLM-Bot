@@ -1,0 +1,176 @@
+{
+  "id": "resp_05d08682aba6af83006a0caf652c3c8196b41d05008189edf3",
+  "object": "response",
+  "created_at": 1779216229,
+  "status": "completed",
+  "background": false,
+  "billing": {
+    "payer": "openai"
+  },
+  "completed_at": 1779216232,
+  "error": null,
+  "frequency_penalty": 0.0,
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "model": "gpt-5.4-mini-2026-03-17",
+  "moderation": null,
+  "output": [
+    {
+      "id": "ws_05d08682aba6af83006a0caf65e3b88196883d626a8e9d9c20",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "queries": [
+          "site:reform-tamao.com 施工事例 最新",
+          "site:reform-tamao.com reform-tamao 施工事例"
+        ],
+        "query": "site:reform-tamao.com 施工事例 最新",
+        "sources": [
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9504.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9530.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/8616.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/3494.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/10088.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/10130.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/8645.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/12404.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/3411.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/9946.html"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reform-tamao.com/works/8254.html"
+          }
+        ]
+      }
+    },
+    {
+      "id": "msg_05d08682aba6af83006a0caf6721ac8196bf40b8c833b60f3c",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [
+            {
+              "type": "url_citation",
+              "end_index": 260,
+              "start_index": 176,
+              "title": "長与町｜浴室リフォーム｜洗面台取替｜リフォームのタマオ",
+              "url": "https://www.reform-tamao.com/works/9504.html?utm_source=openai"
+            },
+            {
+              "type": "url_citation",
+              "end_index": 488,
+              "start_index": 404,
+              "title": "諫早市｜キッチンリフォーム｜浴室リフォーム｜洗面台取替｜リフォームのタマオ",
+              "url": "https://www.reform-tamao.com/works/9530.html?utm_source=openai"
+            },
+            {
+              "type": "url_citation",
+              "end_index": 710,
+              "start_index": 625,
+              "title": "長崎市｜浴室リフォーム｜給湯器取替｜リフォームのタマオ",
+              "url": "https://www.reform-tamao.com/works/10088.html?utm_source=openai"
+            }
+          ],
+          "logprobs": [],
+          "text": "最新の施工事例から、確認できた3件をご紹介します。  \n\n1. **長与町｜浴室リフォーム｜洗面台取替**  \n   - 施工内容：クリナップ「ラクヴィア」1616、洗面台「BGA」75cm など  \n   - 施工費用：約207万円  \n   - 施工期間：7日間  \n   - 掲載時点で「最新の施工事例」一覧に近い新着事例として確認できました。 ([reform-tamao.com](https://www.reform-tamao.com/works/9504.html?utm_source=openai))\n\n2. **諫早市｜キッチンリフォーム｜浴室リフォーム｜洗面台取替**  \n   - 施工内容：キッチン「ラクエラ」2400、浴室「ラクヴィア」1317 など  \n   - 施工費用：約399万円  \n   - 施工期間：18日間  \n   - 新着の施工事例として掲載されています。 ([reform-tamao.com](https://www.reform-tamao.com/works/9530.html?utm_source=openai))\n\n3. **長崎市｜浴室リフォーム｜給湯器取替**  \n   - 施工内容：LIXIL「リデア」1216、リンナイ エコジョーズ 20号など  \n   - 施工費用：約124万円  \n   - 施工期間：6日間  \n   - こちらも新しい施工事例として確認できました。 ([reform-tamao.com](https://www.reform-tamao.com/works/10088.html?utm_source=openai))\n\n必要なら次に、**「費用が安い順」**や**「キッチンだけ」**などで3件に絞ってお出しできます。"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0.0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "in_memory",
+  "reasoning": {
+    "effort": "none",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "required",
+  "tools": [
+    {
+      "type": "web_search",
+      "filters": {
+        "allowed_domains": [
+          "reform-tamao.com"
+        ]
+      },
+      "return_token_budget": "default",
+      "search_context_size": "high",
+      "user_location": {
+        "type": "approximate",
+        "city": null,
+        "country": "US",
+        "region": null,
+        "timezone": null
+      }
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 8478,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 466,
+    "output_tokens_details": {
+      "reasoning_tokens": 75
+    },
+    "total_tokens": 8944
+  },
+  "user": null,
+  "metadata": {}
+}

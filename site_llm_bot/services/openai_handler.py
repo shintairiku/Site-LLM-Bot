@@ -134,6 +134,7 @@ class OpenAIChatHandler:
             " Markdown記法の強調（**や__）は使わないでください。"
             " 回答本文にURLや参照元ドメイン名、括弧付きの出典表記は含めないでください。"
             " 関連リンクはシステム側で追加するため、回答本文には含めないでください。"
+            " 質問内容が簡単なものであってもweb searchによる徹底的な情報収集を行ってください。"
         )
         if self._search_allowed_domains:
             developer_instruction += (
