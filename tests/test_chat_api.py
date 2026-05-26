@@ -619,6 +619,27 @@ async def test_v1_api_rejects_invalid_widget_token() -> None:
 
 
 @pytest.mark.anyio
+async def test_v1_api_rejects_widget_token_from_other_tenant() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/v1/widget/config",
+            headers=widget_headers(
+                tenant_id="tenant-two",
+                token="public_sample_shintairiku",
+                origin="https://tenant-two.example.com",
+            ),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "invalid widget token"
+
+
+@pytest.mark.anyio
 async def test_chat_api_cors_rejects_unknown_origin() -> None:
     app = create_app(settings=build_settings(api_key=None))
 
