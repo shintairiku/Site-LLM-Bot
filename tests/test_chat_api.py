@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -536,6 +537,68 @@ async def test_v1_chat_message_with_mock_openai() -> None:
     assert response.json()["session_id"] == session_response.json()["session_id"]
     assert "施工エリア" in response.json()["answer"]
     await openai_client.aclose()
+
+
+@pytest.mark.anyio
+async def test_api_access_log_includes_required_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    with caplog.at_level(logging.INFO, logger="site_llm_bot.access"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/v1/widget/config",
+                headers=widget_headers()
+                | {"X-Forwarded-For": "203.0.113.10, 10.0.0.1"},
+            )
+
+    assert response.status_code == 200
+    access_logs = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "site_llm_bot.access"
+    ]
+    assert access_logs
+    latest = access_logs[-1]
+    assert latest["tenant_id"] == "sample-shintairiku"
+    assert latest["origin"] == "https://tenant-one.example.com"
+    assert latest["ip"] == "203.0.113.10"
+    assert latest["path"] == "/v1/widget/config"
+    assert latest["status_code"] == 200
+    assert isinstance(latest["latency_ms"], float)
+
+
+@pytest.mark.anyio
+async def test_api_access_log_records_auth_error_status(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    with caplog.at_level(logging.INFO, logger="site_llm_bot.access"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/v1/widget/config",
+                headers=widget_headers(token="wrong-token")
+                | {"X-Real-IP": "203.0.113.20"},
+            )
+
+    assert response.status_code == 403
+    access_logs = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "site_llm_bot.access"
+    ]
+    assert access_logs[-1]["tenant_id"] == "sample-shintairiku"
+    assert access_logs[-1]["ip"] == "203.0.113.20"
+    assert access_logs[-1]["path"] == "/v1/widget/config"
+    assert access_logs[-1]["status_code"] == 403
 
 
 @pytest.mark.anyio

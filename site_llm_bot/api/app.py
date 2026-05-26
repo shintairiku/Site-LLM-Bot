@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from html import escape
+import json
+import logging
 from pathlib import Path
 import re
+import time
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -17,6 +20,12 @@ from site_llm_bot.services.session_store import InMemorySessionStore, TenantSess
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 STATIC_DIR = BASE_DIR / "static"
+ACCESS_LOGGER = logging.getLogger("site_llm_bot.access")
+ACCESS_LOGGER.setLevel(logging.INFO)
+if not ACCESS_LOGGER.handlers:
+    access_log_handler = logging.StreamHandler()
+    access_log_handler.setFormatter(logging.Formatter("%(message)s"))
+    ACCESS_LOGGER.addHandler(access_log_handler)
 
 
 class ChatRequest(BaseModel):
@@ -84,6 +93,18 @@ def create_app(
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+    @app.middleware("http")
+    async def access_log_middleware(request: Request, call_next):
+        started_at = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            log_access(request=request, status_code=status_code, latency_ms=latency_ms)
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -110,6 +131,7 @@ def create_app(
             widget_token=x_widget_token,
             origin=http_request.headers.get("origin"),
         )
+        http_request.state.tenant_id = tenant.tenant_id
         return WidgetConfigResponse(
             tenant_id=tenant.tenant_id,
             display_name=tenant.display_name,
@@ -132,6 +154,7 @@ def create_app(
             widget_token=x_widget_token,
             origin=origin,
         )
+        http_request.state.tenant_id = tenant.tenant_id
         session = session_store.get_or_create(
             None,
             tenant_id=tenant.tenant_id,
@@ -158,6 +181,7 @@ def create_app(
             widget_token=x_widget_token,
             origin=origin,
         )
+        http_request.state.tenant_id = tenant.tenant_id
         return await generate_chat_response(
             settings=app_settings,
             session_store=session_store,
@@ -185,6 +209,7 @@ def create_app(
             widget_token=x_widget_token,
             origin=origin,
         )
+        http_request.state.tenant_id = tenant.tenant_id
         if not tenant.allowed_domains:
             raise HTTPException(status_code=403, detail="allowed domains not configured")
 
@@ -295,6 +320,37 @@ def authenticate_widget_request(
     if not is_origin_allowed(tenant, origin):
         raise HTTPException(status_code=403, detail="origin is not allowed")
     return tenant
+
+
+def extract_client_ip(request: Request) -> str:
+    """プロキシ配下を想定し、転送ヘッダからクライアント IP を取得する。"""
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",", 1)[0].strip()
+        if client_ip:
+            return client_ip
+
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip and real_ip.strip():
+        return real_ip.strip()
+
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def log_access(*, request: Request, status_code: int, latency_ms: float) -> None:
+    """運用監視で拾いやすい JSON 形式のアクセスログを出力する。"""
+    tenant_id = getattr(request.state, "tenant_id", None) or request.headers.get("x-tenant-id")
+    payload = {
+        "tenant_id": tenant_id,
+        "origin": request.headers.get("origin"),
+        "ip": extract_client_ip(request),
+        "path": request.url.path,
+        "status_code": status_code,
+        "latency_ms": latency_ms,
+    }
+    ACCESS_LOGGER.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
 def collect_allowed_origins(settings: Settings) -> list[str]:
