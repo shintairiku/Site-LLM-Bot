@@ -822,13 +822,8 @@ def test_distribution_widget_assets_exist() -> None:
 
 
 @pytest.mark.anyio
-async def test_demo_page_injects_widget_api_base() -> None:
-    app = create_app(
-        settings=build_settings(
-            api_key=None,
-            widget_api_base="https://dev-backend.example.com",
-        )
-    )
+async def test_demo_page_uses_fixed_cloud_run_widget_url() -> None:
+    app = create_app(settings=build_settings(api_key=None))
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -837,8 +832,14 @@ async def test_demo_page_injects_widget_api_base() -> None:
         response = await client.get("/demo")
 
     assert response.status_code == 200
-    assert 'src="/static/widget.js"' in response.text
-    assert 'data-api-base="https://dev-backend.example.com"' in response.text
+    assert (
+        'src="https://site-llm-bot-742231208085.asia-northeast1.run.app/static/widget.js"'
+        in response.text
+    )
+    assert (
+        'data-api-base="https://site-llm-bot-742231208085.asia-northeast1.run.app"'
+        in response.text
+    )
     assert 'data-public-token="public_sample_shintairiku"' in response.text
     assert "data-color" not in response.text
     assert "site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js" not in response.text
