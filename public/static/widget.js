@@ -7,6 +7,8 @@
   // 埋め込み script タグの data 属性を起点に、ウィジェット表示に必要な設定値を初期化する。
   // 見た目は共通 CSS と tenant 別 CSS で管理し、顧客側の data 属性では制御しない。
   const baseUrl = new URL("./", script.src || window.location.href);
+  const productionApiBase = "https://site-llm-bot-742231208085.asia-northeast1.run.app";
+  const developmentApiBase = "https://site-llm-bot-dev-742231208085.asia-northeast1.run.app";
   const cssUrl = new URL("widget.css", baseUrl).toString();
   const tenantCssBaseUrl = new URL("tenants/", baseUrl).toString();
   const apiBase = resolveApiBase(
@@ -316,7 +318,10 @@
     ) {
       return window.location.origin;
     }
-    return "https://site-llm-bot-742231208085.asia-northeast1.run.app";
+    if (baseUrl.hostname === new URL(developmentApiBase).hostname) {
+      return developmentApiBase;
+    }
+    return productionApiBase;
   }
 
   // パネルのタイトルに tenantName を埋め込むための最低限のエスケープ関数。

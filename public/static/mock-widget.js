@@ -7,6 +7,8 @@
   // 埋め込み script タグの data 属性を起点に、ウィジェット表示に必要な設定値を初期化する。
   // この値は下の render 相当の処理と、テーマ反映、モック応答表示で参照される。
   const baseUrl = new URL("./", script.src || window.location.href);
+  const productionApiBase = "https://site-llm-bot-742231208085.asia-northeast1.run.app";
+  const developmentApiBase = "https://site-llm-bot-dev-742231208085.asia-northeast1.run.app";
   const cssUrl = new URL("mock-widget.css", baseUrl).toString();
   const apiBase = resolveApiBase(
     script.dataset.apiBase
@@ -281,7 +283,10 @@
     ) {
       return window.location.origin;
     }
-    return "https://site-llm-bot-742231208085.asia-northeast1.run.app";
+    if (baseUrl.hostname === new URL(developmentApiBase).hostname) {
+      return developmentApiBase;
+    }
+    return productionApiBase;
   }
 
   // パネルのタイトルに tenantName を埋め込むための最低限のエスケープ関数。
