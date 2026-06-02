@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from html import escape
 import json
 import logging
@@ -15,6 +16,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from site_llm_bot.config import Settings, TenantConfig
+from site_llm_bot.services.analytics_store import (
+    AnalyticsStore,
+    ChatMessageSentEvent,
+    JsonAnalyticsStore,
+)
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
 
@@ -78,10 +84,13 @@ class ChatMessageRequest(BaseModel):
 def create_app(
     settings: Settings | None = None,
     openai_client: httpx.AsyncClient | None = None,
+    analytics_store: AnalyticsStore | None = None,
 ) -> FastAPI:
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
     session_store = InMemorySessionStore(ttl_seconds=app_settings.session_ttl_seconds)
+    if analytics_store is None and app_settings.analytics_enabled:
+        analytics_store = JsonAnalyticsStore(app_settings.analytics_log_path)
 
     app = FastAPI(title="Site LLM Bot API", version="0.1.0")
     app.add_middleware(
@@ -187,6 +196,7 @@ def create_app(
             session_store=session_store,
             tenant=tenant,
             openai_client=openai_client,
+            analytics_store=analytics_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
@@ -218,6 +228,7 @@ def create_app(
             session_store=session_store,
             tenant=tenant,
             openai_client=openai_client,
+            analytics_store=analytics_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.page_url,
@@ -233,6 +244,7 @@ async def generate_chat_response(
     session_store: InMemorySessionStore,
     tenant: TenantConfig,
     openai_client: httpx.AsyncClient | None,
+    analytics_store: AnalyticsStore | None,
     session_id: str | None,
     message: str,
     page_url: str | None,
@@ -254,6 +266,17 @@ async def generate_chat_response(
         )
     except TenantSessionMismatch as exc:
         raise HTTPException(status_code=403, detail="session tenant mismatch") from exc
+
+    if analytics_store is not None:
+        analytics_store.record_chat_message_sent(
+            ChatMessageSentEvent(
+                tenant_id=tenant.tenant_id,
+                session_id=session.session_id,
+                origin=origin,
+                page_url=page_url,
+                occurred_at=datetime.now(UTC),
+            )
+        )
 
     history = session_store.history(
         session.session_id,

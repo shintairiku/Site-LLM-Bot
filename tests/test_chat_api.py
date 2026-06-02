@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
 import logging
 import sys
@@ -14,8 +15,13 @@ if str(ROOT_DIR) not in sys.path:
 
 from site_llm_bot.api.app import create_app
 from site_llm_bot.config import Settings, TenantConfig, load_tenant_settings
-from site_llm_bot.services.session_store import ChatMessage
+from site_llm_bot.services.analytics_store import (
+    AnalyticsStore,
+    ChatMessageSentEvent,
+    JsonAnalyticsStore,
+)
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
+from site_llm_bot.services.session_store import ChatMessage
 
 
 @pytest.fixture
@@ -73,6 +79,16 @@ def widget_headers(
     }
 
 
+class RecordingAnalyticsStore(AnalyticsStore):
+    """テスト用に記録イベントをメモリへ保持する。"""
+
+    def __init__(self) -> None:
+        self.events: list[ChatMessageSentEvent] = []
+
+    def record_chat_message_sent(self, event: ChatMessageSentEvent) -> None:
+        self.events.append(event)
+
+
 def test_default_tenant_uses_configured_allowed_domains() -> None:
     tenant_settings = load_tenant_settings("config/tenants.json")
     tenant = tenant_settings.tenants[tenant_settings.default_tenant_id]
@@ -119,12 +135,43 @@ def test_settings_reads_widget_api_base_from_env(
     )
     monkeypatch.setenv("TENANT_CONFIG_PATH", str(tenant_config))
     monkeypatch.setenv("WIDGET_API_BASE", "https://dev-backend.example.com/")
+    monkeypatch.setenv("ANALYTICS_ENABLED", "true")
+    monkeypatch.setenv("ANALYTICS_LOG_PATH", "tmp/custom-analytics.jsonl")
     monkeypatch.delenv("OPENAI_TIMEOUT_SECONDS", raising=False)
 
     settings = Settings.from_env()
 
     assert settings.widget_api_base == "https://dev-backend.example.com"
     assert settings.openai_timeout_seconds == 90.0
+    assert settings.analytics_enabled is True
+    assert settings.analytics_log_path == "tmp/custom-analytics.jsonl"
+
+
+def test_json_analytics_store_writes_chat_message_event(tmp_path: Path) -> None:
+    path = tmp_path / "analytics" / "chat-message-events.jsonl"
+    store = JsonAnalyticsStore(path)
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    store.record_chat_message_sent(
+        ChatMessageSentEvent(
+            tenant_id="sample-shintairiku",
+            session_id="session-1",
+            origin="https://tenant-one.example.com",
+            page_url="https://tenant-one.example.com/reform",
+            occurred_at=occurred_at,
+        )
+    )
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {
+        "event_type": "chat_message_sent",
+        "tenant_id": "sample-shintairiku",
+        "session_id": "session-1",
+        "origin": "https://tenant-one.example.com",
+        "page_url": "https://tenant-one.example.com/reform",
+        "occurred_at": occurred_at.isoformat(),
+    }
 
 
 @pytest.mark.anyio
@@ -156,7 +203,12 @@ async def test_chat_api_with_mock_openai() -> None:
         )
 
     openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(
+        settings=build_settings(),
+        openai_client=openai_client,
+        analytics_store=analytics_store,
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -179,6 +231,11 @@ async def test_chat_api_with_mock_openai() -> None:
     assert "【会社情報】" in response.json()["answer"]
     assert "https://shintairiku.jp/company/" in response.json()["answer"]
     assert response.json()["session_id"]
+    assert len(analytics_store.events) == 1
+    assert analytics_store.events[0].tenant_id == "sample-shintairiku"
+    assert analytics_store.events[0].session_id == response.json()["session_id"]
+    assert analytics_store.events[0].origin == "https://tenant-one.example.com"
+    assert analytics_store.events[0].page_url == "http://localhost/demo"
     await openai_client.aclose()
 
 
@@ -367,7 +424,12 @@ async def test_chat_api_returns_gateway_timeout_when_openai_times_out() -> None:
         raise httpx.ReadTimeout("request timed out", request=request)
 
     openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(
+        settings=build_settings(),
+        openai_client=openai_client,
+        analytics_store=analytics_store,
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -381,6 +443,8 @@ async def test_chat_api_returns_gateway_timeout_when_openai_times_out() -> None:
 
     assert response.status_code == 504
     assert response.json()["detail"] == "OpenAI request timed out: request timed out"
+    assert len(analytics_store.events) == 1
+    assert analytics_store.events[0].tenant_id == "sample-shintairiku"
     await openai_client.aclose()
 
 
@@ -512,7 +576,12 @@ async def test_v1_chat_message_with_mock_openai() -> None:
         )
 
     openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(
+        settings=build_settings(),
+        openai_client=openai_client,
+        analytics_store=analytics_store,
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -536,6 +605,11 @@ async def test_v1_chat_message_with_mock_openai() -> None:
     assert response.json()["source"] == "openai"
     assert response.json()["session_id"] == session_response.json()["session_id"]
     assert "施工エリア" in response.json()["answer"]
+    assert len(analytics_store.events) == 1
+    assert analytics_store.events[0].tenant_id == "sample-shintairiku"
+    assert analytics_store.events[0].session_id == session_response.json()["session_id"]
+    assert analytics_store.events[0].origin == "https://tenant-one.example.com"
+    assert analytics_store.events[0].page_url == "https://tenant-one.example.com/reform"
     await openai_client.aclose()
 
 
@@ -603,7 +677,8 @@ async def test_api_access_log_records_auth_error_status(
 
 @pytest.mark.anyio
 async def test_v1_api_rejects_invalid_widget_token() -> None:
-    app = create_app(settings=build_settings(api_key=None))
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(settings=build_settings(api_key=None), analytics_store=analytics_store)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -616,6 +691,7 @@ async def test_v1_api_rejects_invalid_widget_token() -> None:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "invalid widget token"
+    assert analytics_store.events == []
 
 
 @pytest.mark.anyio
@@ -683,7 +759,8 @@ async def test_chat_api_cors_allows_registered_origin() -> None:
 
 @pytest.mark.anyio
 async def test_chat_api_rejects_invalid_widget_token() -> None:
-    app = create_app(settings=build_settings(api_key=None))
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(settings=build_settings(api_key=None), analytics_store=analytics_store)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -697,6 +774,7 @@ async def test_chat_api_rejects_invalid_widget_token() -> None:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "invalid widget token"
+    assert analytics_store.events == []
 
 
 @pytest.mark.anyio

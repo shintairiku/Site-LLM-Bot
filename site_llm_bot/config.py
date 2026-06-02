@@ -35,6 +35,8 @@ class Settings:
     widget_api_base: str
     default_tenant_id: str
     tenants: dict[str, "TenantConfig"] = field(default_factory=dict)
+    analytics_enabled: bool = False
+    analytics_log_path: str = "/tmp/site-llm-bot/chat-message-events.jsonl"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -53,6 +55,11 @@ class Settings:
             widget_api_base=os.getenv("WIDGET_API_BASE", "").rstrip("/"),
             default_tenant_id=tenant_settings.default_tenant_id,
             tenants=tenant_settings.tenants,
+            analytics_enabled=parse_bool_env(os.getenv("ANALYTICS_ENABLED"), default=False),
+            analytics_log_path=os.getenv(
+                "ANALYTICS_LOG_PATH",
+                "/tmp/site-llm-bot/chat-message-events.jsonl",
+            ),
         )
 
 
@@ -82,6 +89,13 @@ class TenantSettings:
 def parse_csv_env(value: str) -> list[str]:
     """カンマ区切り環境変数を配列へ変換する。"""
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_bool_env(value: str | None, default: bool = False) -> bool:
+    """真偽値の環境変数を bool に変換する。"""
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_tenant_settings(path: str) -> TenantSettings:
