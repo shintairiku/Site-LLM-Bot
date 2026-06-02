@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import io
 import json
 import logging
 import sys
@@ -19,6 +20,7 @@ from site_llm_bot.services.analytics_store import (
     AnalyticsStore,
     ChatMessageSentEvent,
     JsonAnalyticsStore,
+    LoggingAnalyticsStore,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import ChatMessage
@@ -136,7 +138,6 @@ def test_settings_reads_widget_api_base_from_env(
     monkeypatch.setenv("TENANT_CONFIG_PATH", str(tenant_config))
     monkeypatch.setenv("WIDGET_API_BASE", "https://dev-backend.example.com/")
     monkeypatch.setenv("ANALYTICS_ENABLED", "true")
-    monkeypatch.setenv("ANALYTICS_LOG_PATH", "tmp/custom-analytics.jsonl")
     monkeypatch.delenv("OPENAI_TIMEOUT_SECONDS", raising=False)
 
     settings = Settings.from_env()
@@ -144,7 +145,42 @@ def test_settings_reads_widget_api_base_from_env(
     assert settings.widget_api_base == "https://dev-backend.example.com"
     assert settings.openai_timeout_seconds == 90.0
     assert settings.analytics_enabled is True
-    assert settings.analytics_log_path == "tmp/custom-analytics.jsonl"
+
+
+def test_logging_analytics_store_writes_structured_chat_message_event() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("site_llm_bot.test.analytics")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.addHandler(handler)
+    store = LoggingAnalyticsStore(logger=logger)
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    try:
+        store.record_chat_message_sent(
+            ChatMessageSentEvent(
+                tenant_id="sample-shintairiku",
+                session_id="session-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                occurred_at=occurred_at,
+            )
+        )
+    finally:
+        logger.removeHandler(handler)
+
+    assert json.loads(stream.getvalue()) == {
+        "event_type": "chat_message_sent",
+        "tenant_id": "sample-shintairiku",
+        "session_id": "session-1",
+        "origin": "https://tenant-one.example.com",
+        "page_url": "https://tenant-one.example.com/reform",
+        "occurred_at": occurred_at.isoformat(),
+        "message": "chat_message_sent",
+        "severity": "INFO",
+    }
 
 
 def test_json_analytics_store_writes_chat_message_event(tmp_path: Path) -> None:

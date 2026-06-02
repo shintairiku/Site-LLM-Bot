@@ -19,7 +19,7 @@ from site_llm_bot.config import Settings, TenantConfig
 from site_llm_bot.services.analytics_store import (
     AnalyticsStore,
     ChatMessageSentEvent,
-    JsonAnalyticsStore,
+    LoggingAnalyticsStore,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
@@ -90,7 +90,7 @@ def create_app(
     app_settings = settings or Settings.from_env()
     session_store = InMemorySessionStore(ttl_seconds=app_settings.session_ttl_seconds)
     if analytics_store is None and app_settings.analytics_enabled:
-        analytics_store = JsonAnalyticsStore(app_settings.analytics_log_path)
+        analytics_store = LoggingAnalyticsStore()
 
     app = FastAPI(title="Site LLM Bot API", version="0.1.0")
     app.add_middleware(

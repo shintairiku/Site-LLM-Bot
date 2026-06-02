@@ -36,7 +36,6 @@ class Settings:
     default_tenant_id: str
     tenants: dict[str, "TenantConfig"] = field(default_factory=dict)
     analytics_enabled: bool = False
-    analytics_log_path: str = "/tmp/site-llm-bot/chat-message-events.jsonl"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -56,10 +55,6 @@ class Settings:
             default_tenant_id=tenant_settings.default_tenant_id,
             tenants=tenant_settings.tenants,
             analytics_enabled=parse_bool_env(os.getenv("ANALYTICS_ENABLED"), default=False),
-            analytics_log_path=os.getenv(
-                "ANALYTICS_LOG_PATH",
-                "/tmp/site-llm-bot/chat-message-events.jsonl",
-            ),
         )
 
 
