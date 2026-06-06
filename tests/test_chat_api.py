@@ -21,6 +21,7 @@ from site_llm_bot.services.analytics_store import (
     ChatMessageSentEvent,
     JsonAnalyticsStore,
     LoggingAnalyticsStore,
+    SupabaseChatMessageSentStore,
     UserFirstSeenEvent,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
@@ -95,6 +96,23 @@ class RecordingAnalyticsStore(AnalyticsStore):
 
     def record_user_first_seen(self, event: UserFirstSeenEvent) -> None:
         self.user_first_seen_events.append(event)
+
+
+class RecordingChatMessageSentStore:
+    """テスト用にDB記録対象イベントをメモリへ保持する。"""
+
+    def __init__(self) -> None:
+        self.events: list[ChatMessageSentEvent] = []
+
+    async def record(self, event: ChatMessageSentEvent) -> None:
+        self.events.append(event)
+
+
+class FailingChatMessageSentStore:
+    """テスト用にDB記録失敗を発生させる。"""
+
+    async def record(self, event: ChatMessageSentEvent) -> None:
+        raise RuntimeError("failed to write analytics")
 
 
 def test_default_tenant_uses_configured_allowed_domains() -> None:
@@ -244,6 +262,85 @@ async def test_supabase_unique_user_store_omits_authorization_for_secret_key() -
     assert "authorization" not in seen_headers[0]
 
 
+@pytest.mark.anyio
+async def test_supabase_chat_message_sent_store_calls_record_chat_message_sent_rpc() -> None:
+    seen_requests: list[httpx.Request] = []
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {
+            "p_tenant_id": "sample-shintairiku",
+            "p_session_id": "session-1",
+            "p_visitor_id": "visitor-1",
+            "p_origin": "https://tenant-one.example.com",
+            "p_page_url": "https://tenant-one.example.com/reform",
+            "p_occurred_at": occurred_at.isoformat(),
+        }
+        assert request.headers["apikey"] == "service-role-key"
+        assert request.headers["authorization"] == "Bearer service-role-key"
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseChatMessageSentStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            ChatMessageSentEvent(
+                tenant_id="sample-shintairiku",
+                session_id="session-1",
+                visitor_id="visitor-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                occurred_at=occurred_at,
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert str(seen_requests[0].url) == (
+        "https://project-ref.supabase.co/rest/v1/rpc/record_chat_message_sent"
+    )
+
+
+@pytest.mark.anyio
+async def test_supabase_chat_message_sent_store_omits_authorization_for_secret_key() -> None:
+    seen_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers)
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseChatMessageSentStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="sb_secret_test-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            ChatMessageSentEvent(
+                tenant_id="sample-shintairiku",
+                session_id="session-1",
+                visitor_id=None,
+                origin=None,
+                page_url=None,
+                occurred_at=datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC),
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert seen_headers[0]["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in seen_headers[0]
+
+
 def test_logging_analytics_store_writes_structured_chat_message_event() -> None:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
@@ -375,10 +472,12 @@ async def test_chat_api_with_mock_openai() -> None:
 
     openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     analytics_store = RecordingAnalyticsStore()
+    chat_message_sent_store = RecordingChatMessageSentStore()
     app = create_app(
         settings=build_settings(),
         openai_client=openai_client,
         analytics_store=analytics_store,
+        chat_message_sent_store=chat_message_sent_store,
     )
 
     async with httpx.AsyncClient(
@@ -409,6 +508,12 @@ async def test_chat_api_with_mock_openai() -> None:
     assert analytics_store.events[0].visitor_id == "visitor-1"
     assert analytics_store.events[0].origin == "https://tenant-one.example.com"
     assert analytics_store.events[0].page_url == "http://localhost/demo"
+    assert len(chat_message_sent_store.events) == 1
+    assert chat_message_sent_store.events[0].tenant_id == "sample-shintairiku"
+    assert chat_message_sent_store.events[0].session_id == response.json()["session_id"]
+    assert chat_message_sent_store.events[0].visitor_id == "visitor-1"
+    assert chat_message_sent_store.events[0].origin == "https://tenant-one.example.com"
+    assert chat_message_sent_store.events[0].page_url == "http://localhost/demo"
     assert len(analytics_store.user_first_seen_events) == 1
     assert analytics_store.user_first_seen_events[0].tenant_id == "sample-shintairiku"
     assert analytics_store.user_first_seen_events[0].visitor_id == "visitor-1"
@@ -681,6 +786,28 @@ async def test_chat_api_demo_fallback_without_api_key() -> None:
     assert response.status_code == 200
     assert response.json()["source"] == "demo"
     assert "デモモード" in response.json()["answer"]
+    assert response.json()["session_id"]
+
+
+@pytest.mark.anyio
+async def test_chat_api_continues_when_chat_message_db_recording_fails() -> None:
+    app = create_app(
+        settings=build_settings(api_key=None),
+        chat_message_sent_store=FailingChatMessageSentStore(),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            json={"message": "相談の流れを知りたいです"},
+            headers=widget_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "demo"
     assert response.json()["session_id"]
 
 
