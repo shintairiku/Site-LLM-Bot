@@ -20,9 +20,15 @@ from site_llm_bot.services.analytics_store import (
     AnalyticsStore,
     ChatMessageSentEvent,
     LoggingAnalyticsStore,
+    UserFirstSeenEvent,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
+from site_llm_bot.services.unique_user_store import (
+    InMemoryUniqueUserStore,
+    SupabaseUniqueUserStore,
+    UniqueUserStore,
+)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 STATIC_DIR = BASE_DIR / "static"
@@ -41,6 +47,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     page_url: str | None = None
     session_id: str | None = None
+    visitor_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -71,6 +78,7 @@ class ChatMessageMetadata(BaseModel):
     """チャット発話に付随するメタデータ。"""
 
     page_url: str | None = None
+    visitor_id: str | None = None
 
 
 class ChatMessageRequest(BaseModel):
@@ -85,10 +93,12 @@ def create_app(
     settings: Settings | None = None,
     openai_client: httpx.AsyncClient | None = None,
     analytics_store: AnalyticsStore | None = None,
+    unique_user_store: UniqueUserStore | None = None,
 ) -> FastAPI:
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
     session_store = InMemorySessionStore(ttl_seconds=app_settings.session_ttl_seconds)
+    unique_user_store = unique_user_store or create_unique_user_store(app_settings)
     if analytics_store is None and app_settings.analytics_enabled:
         analytics_store = LoggingAnalyticsStore()
 
@@ -197,9 +207,11 @@ def create_app(
             tenant=tenant,
             openai_client=openai_client,
             analytics_store=analytics_store,
+            unique_user_store=unique_user_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
+            visitor_id=chat_request.metadata.visitor_id,
             origin=origin,
         )
 
@@ -229,9 +241,11 @@ def create_app(
             tenant=tenant,
             openai_client=openai_client,
             analytics_store=analytics_store,
+            unique_user_store=unique_user_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.page_url,
+            visitor_id=chat_request.visitor_id,
             origin=origin,
         )
 
@@ -245,9 +259,11 @@ async def generate_chat_response(
     tenant: TenantConfig,
     openai_client: httpx.AsyncClient | None,
     analytics_store: AnalyticsStore | None,
+    unique_user_store: UniqueUserStore,
     session_id: str | None,
     message: str,
     page_url: str | None,
+    visitor_id: str | None,
     origin: str | None,
 ) -> ChatResponse:
     """認証済みテナントのチャット応答を生成する。"""
@@ -257,6 +273,7 @@ async def generate_chat_response(
     normalized_message = message.strip()
     if not normalized_message:
         raise HTTPException(status_code=400, detail="message is required")
+    normalized_visitor_id = normalize_visitor_id(visitor_id)
 
     try:
         session = session_store.get_or_create(
@@ -267,6 +284,15 @@ async def generate_chat_response(
     except TenantSessionMismatch as exc:
         raise HTTPException(status_code=403, detail="session tenant mismatch") from exc
 
+    occurred_at = datetime.now(UTC)
+    is_user_first_seen = await mark_unique_user_seen(
+        unique_user_store=unique_user_store,
+        tenant_id=tenant.tenant_id,
+        visitor_id=normalized_visitor_id,
+        origin=origin,
+        page_url=page_url,
+    )
+
     if analytics_store is not None:
         analytics_store.record_chat_message_sent(
             ChatMessageSentEvent(
@@ -274,9 +300,20 @@ async def generate_chat_response(
                 session_id=session.session_id,
                 origin=origin,
                 page_url=page_url,
-                occurred_at=datetime.now(UTC),
+                occurred_at=occurred_at,
+                visitor_id=normalized_visitor_id,
             )
         )
+        if is_user_first_seen and normalized_visitor_id:
+            analytics_store.record_user_first_seen(
+                UserFirstSeenEvent(
+                    tenant_id=tenant.tenant_id,
+                    visitor_id=normalized_visitor_id,
+                    origin=origin,
+                    page_url=page_url,
+                    occurred_at=occurred_at,
+                )
+            )
 
     history = session_store.history(
         session.session_id,
@@ -312,6 +349,42 @@ async def generate_chat_response(
     return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
 
+def create_unique_user_store(settings: Settings) -> UniqueUserStore:
+    """Supabase設定があればDB連携、なければプロセス内判定を使う。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabaseUniqueUserStore(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return InMemoryUniqueUserStore()
+
+
+async def mark_unique_user_seen(
+    *,
+    unique_user_store: UniqueUserStore,
+    tenant_id: str,
+    visitor_id: str | None,
+    origin: str | None,
+    page_url: str | None,
+) -> bool:
+    """匿名利用者の初回利用を記録する。失敗してもチャット処理は止めない。"""
+    if not visitor_id:
+        return False
+    try:
+        return await unique_user_store.mark_seen(
+            tenant_id,
+            visitor_id,
+            origin=origin,
+            page_url=page_url,
+        )
+    except Exception:
+        logging.getLogger("site_llm_bot.analytics").exception(
+            "failed to record unique user"
+        )
+        return False
+
+
 def resolve_tenant(settings: Settings, tenant_id: str | None) -> TenantConfig:
     """リクエストに対応するテナント設定を返す。"""
     resolved_tenant_id = tenant_id or settings.default_tenant_id
@@ -319,6 +392,18 @@ def resolve_tenant(settings: Settings, tenant_id: str | None) -> TenantConfig:
     if tenant is None:
         raise HTTPException(status_code=404, detail="tenant not found")
     return tenant
+
+
+def normalize_visitor_id(visitor_id: str | None) -> str | None:
+    """ウィジェットが発行した匿名 visitor_id をログ保存用に正規化する。"""
+    if visitor_id is None:
+        return None
+    normalized = visitor_id.strip()
+    if not normalized or len(normalized) > 128:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9._:-]+", normalized) is None:
+        return None
+    return normalized
 
 
 def authenticate_widget_request(

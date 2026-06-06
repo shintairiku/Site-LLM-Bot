@@ -21,9 +21,11 @@ from site_llm_bot.services.analytics_store import (
     ChatMessageSentEvent,
     JsonAnalyticsStore,
     LoggingAnalyticsStore,
+    UserFirstSeenEvent,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import ChatMessage
+from site_llm_bot.services.unique_user_store import SupabaseUniqueUserStore
 
 
 @pytest.fixture
@@ -86,9 +88,13 @@ class RecordingAnalyticsStore(AnalyticsStore):
 
     def __init__(self) -> None:
         self.events: list[ChatMessageSentEvent] = []
+        self.user_first_seen_events: list[UserFirstSeenEvent] = []
 
     def record_chat_message_sent(self, event: ChatMessageSentEvent) -> None:
         self.events.append(event)
+
+    def record_user_first_seen(self, event: UserFirstSeenEvent) -> None:
+        self.user_first_seen_events.append(event)
 
 
 def test_default_tenant_uses_configured_allowed_domains() -> None:
@@ -138,6 +144,9 @@ def test_settings_reads_widget_api_base_from_env(
     monkeypatch.setenv("TENANT_CONFIG_PATH", str(tenant_config))
     monkeypatch.setenv("WIDGET_API_BASE", "https://dev-backend.example.com/")
     monkeypatch.setenv("ANALYTICS_ENABLED", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://project-ref.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.setenv("SUPABASE_TIMEOUT_SECONDS", "5")
     monkeypatch.delenv("OPENAI_TIMEOUT_SECONDS", raising=False)
 
     settings = Settings.from_env()
@@ -145,6 +154,94 @@ def test_settings_reads_widget_api_base_from_env(
     assert settings.widget_api_base == "https://dev-backend.example.com"
     assert settings.openai_timeout_seconds == 90.0
     assert settings.analytics_enabled is True
+    assert settings.supabase_url == "https://project-ref.supabase.co"
+    assert settings.supabase_service_role_key == "service-role-key"
+    assert settings.supabase_timeout_seconds == 5.0
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_calls_record_unique_user_rpc() -> None:
+    seen_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {
+            "p_tenant_id": "sample-shintairiku",
+            "p_visitor_id": "visitor-1",
+            "p_origin": "https://tenant-one.example.com",
+            "p_page_url": "https://tenant-one.example.com/reform",
+        }
+        assert request.headers["apikey"] == "service-role-key"
+        assert request.headers["authorization"] == "Bearer service-role-key"
+        return httpx.Response(200, json=True)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen(
+            "sample-shintairiku",
+            "visitor-1",
+            origin="https://tenant-one.example.com",
+            page_url="https://tenant-one.example.com/reform",
+        )
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is True
+    assert str(seen_requests[0].url) == (
+        "https://project-ref.supabase.co/rest/v1/rpc/record_unique_user"
+    )
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_returns_false_for_existing_user() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=False)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co/",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen("sample-shintairiku", "visitor-1")
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is False
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_omits_authorization_for_secret_key() -> None:
+    seen_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers)
+        return httpx.Response(200, json=True)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="sb_secret_test-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen("sample-shintairiku", "visitor-1")
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is True
+    assert seen_headers[0]["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in seen_headers[0]
 
 
 def test_logging_analytics_store_writes_structured_chat_message_event() -> None:
@@ -175,10 +272,47 @@ def test_logging_analytics_store_writes_structured_chat_message_event() -> None:
         "event_type": "chat_message_sent",
         "tenant_id": "sample-shintairiku",
         "session_id": "session-1",
+        "visitor_id": None,
         "origin": "https://tenant-one.example.com",
         "page_url": "https://tenant-one.example.com/reform",
         "occurred_at": occurred_at.isoformat(),
         "message": "chat_message_sent",
+        "severity": "INFO",
+    }
+
+
+def test_logging_analytics_store_writes_user_first_seen_event() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("site_llm_bot.test.analytics.user")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.addHandler(handler)
+    store = LoggingAnalyticsStore(logger=logger)
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    try:
+        store.record_user_first_seen(
+            UserFirstSeenEvent(
+                tenant_id="sample-shintairiku",
+                visitor_id="visitor-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                occurred_at=occurred_at,
+            )
+        )
+    finally:
+        logger.removeHandler(handler)
+
+    assert json.loads(stream.getvalue()) == {
+        "event_type": "user_first_seen",
+        "tenant_id": "sample-shintairiku",
+        "visitor_id": "visitor-1",
+        "origin": "https://tenant-one.example.com",
+        "page_url": "https://tenant-one.example.com/reform",
+        "occurred_at": occurred_at.isoformat(),
+        "message": "user_first_seen",
         "severity": "INFO",
     }
 
@@ -204,6 +338,7 @@ def test_json_analytics_store_writes_chat_message_event(tmp_path: Path) -> None:
         "event_type": "chat_message_sent",
         "tenant_id": "sample-shintairiku",
         "session_id": "session-1",
+        "visitor_id": None,
         "origin": "https://tenant-one.example.com",
         "page_url": "https://tenant-one.example.com/reform",
         "occurred_at": occurred_at.isoformat(),
@@ -256,6 +391,7 @@ async def test_chat_api_with_mock_openai() -> None:
                 "tenant_id": "sample-shintairiku",
                 "message": "施工エリアを教えてください",
                 "page_url": "http://localhost/demo",
+                "visitor_id": "visitor-1",
             },
             headers=widget_headers(),
         )
@@ -270,8 +406,12 @@ async def test_chat_api_with_mock_openai() -> None:
     assert len(analytics_store.events) == 1
     assert analytics_store.events[0].tenant_id == "sample-shintairiku"
     assert analytics_store.events[0].session_id == response.json()["session_id"]
+    assert analytics_store.events[0].visitor_id == "visitor-1"
     assert analytics_store.events[0].origin == "https://tenant-one.example.com"
     assert analytics_store.events[0].page_url == "http://localhost/demo"
+    assert len(analytics_store.user_first_seen_events) == 1
+    assert analytics_store.user_first_seen_events[0].tenant_id == "sample-shintairiku"
+    assert analytics_store.user_first_seen_events[0].visitor_id == "visitor-1"
     await openai_client.aclose()
 
 
@@ -545,6 +685,39 @@ async def test_chat_api_demo_fallback_without_api_key() -> None:
 
 
 @pytest.mark.anyio
+async def test_chat_api_records_user_first_seen_only_once_per_visitor() -> None:
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(settings=build_settings(api_key=None), analytics_store=analytics_store)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        first_response = await client.post(
+            "/api/chat",
+            json={
+                "message": "相談の流れを知りたいです",
+                "visitor_id": "visitor-repeat",
+            },
+            headers=widget_headers(),
+        )
+        second_response = await client.post(
+            "/api/chat",
+            json={
+                "message": "施工エリアを教えてください",
+                "visitor_id": "visitor-repeat",
+            },
+            headers=widget_headers(),
+        )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert len(analytics_store.events) == 2
+    assert len(analytics_store.user_first_seen_events) == 1
+    assert analytics_store.user_first_seen_events[0].visitor_id == "visitor-repeat"
+
+
+@pytest.mark.anyio
 async def test_v1_widget_config_returns_tenant_public_settings() -> None:
     app = create_app(settings=build_settings(api_key=None))
 
@@ -633,7 +806,10 @@ async def test_v1_chat_message_with_mock_openai() -> None:
             json={
                 "session_id": session_response.json()["session_id"],
                 "message": "施工エリアを教えてください",
-                "metadata": {"page_url": "https://tenant-one.example.com/reform"},
+                "metadata": {
+                    "page_url": "https://tenant-one.example.com/reform",
+                    "visitor_id": "visitor-2",
+                },
             },
         )
 
@@ -644,8 +820,11 @@ async def test_v1_chat_message_with_mock_openai() -> None:
     assert len(analytics_store.events) == 1
     assert analytics_store.events[0].tenant_id == "sample-shintairiku"
     assert analytics_store.events[0].session_id == session_response.json()["session_id"]
+    assert analytics_store.events[0].visitor_id == "visitor-2"
     assert analytics_store.events[0].origin == "https://tenant-one.example.com"
     assert analytics_store.events[0].page_url == "https://tenant-one.example.com/reform"
+    assert len(analytics_store.user_first_seen_events) == 1
+    assert analytics_store.user_first_seen_events[0].visitor_id == "visitor-2"
     await openai_client.aclose()
 
 
@@ -923,6 +1102,8 @@ def test_distribution_widget_assets_exist() -> None:
     assert 'new URL("widget.css", baseUrl)' in widget_js
     assert 'new URL("tenants/", baseUrl)' in widget_js
     assert "developmentApiBase" in widget_js
+    assert "site-llm-bot-visitor-id" in widget_js
+    assert "visitor_id: visitorId" in widget_js
     assert "site-llm-bot-dev-742231208085.asia-northeast1.run.app" in widget_js
     assert "site-llm-bot-742231208085.asia-northeast1.run.app" in widget_js
     assert "ensureTenantCss(tenantId)" in widget_js

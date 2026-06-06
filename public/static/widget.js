@@ -17,6 +17,7 @@
   let tenantId = script.dataset.tenantId || "sample-shintairiku";
   let tenantName = script.dataset.tenantName || "サンプル工務店";
   let publicToken = script.dataset.publicToken || "";
+  const visitorId = resolveVisitorId();
   let sessionId = null;
   const suggestions = [
     "施工エリアを教えてください",
@@ -185,7 +186,10 @@
       body: JSON.stringify({
         session_id: sessionId,
         message: text,
-        metadata: { page_url: window.location.href },
+        metadata: {
+          page_url: window.location.href,
+          visitor_id: visitorId,
+        },
       }),
     });
     if (!response.ok) {
@@ -322,6 +326,37 @@
       return developmentApiBase;
     }
     return productionApiBase;
+  }
+
+  function resolveVisitorId() {
+    const storageKey = "site-llm-bot-visitor-id";
+    const storage = resolveLocalStorage();
+    if (storage) {
+      const existing = storage.getItem(storageKey);
+      if (existing) {
+        return existing;
+      }
+      const nextId = generateVisitorId();
+      storage.setItem(storageKey, nextId);
+      return nextId;
+    }
+    return generateVisitorId();
+  }
+
+  function resolveLocalStorage() {
+    try {
+      return window.localStorage || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function generateVisitorId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    const randomValue = Math.random().toString(36).slice(2, 12);
+    return `${Date.now().toString(36)}-${randomValue}`;
   }
 
   // パネルのタイトルに tenantName を埋め込むための最低限のエスケープ関数。
