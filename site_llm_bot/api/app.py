@@ -18,8 +18,10 @@ from pydantic import BaseModel, Field
 from site_llm_bot.config import Settings, TenantConfig
 from site_llm_bot.services.analytics_store import (
     AnalyticsStore,
+    ChatMessageSentStore,
     ChatMessageSentEvent,
     LoggingAnalyticsStore,
+    SupabaseChatMessageSentStore,
     UserFirstSeenEvent,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
@@ -93,11 +95,15 @@ def create_app(
     settings: Settings | None = None,
     openai_client: httpx.AsyncClient | None = None,
     analytics_store: AnalyticsStore | None = None,
+    chat_message_sent_store: ChatMessageSentStore | None = None,
     unique_user_store: UniqueUserStore | None = None,
 ) -> FastAPI:
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
     session_store = InMemorySessionStore(ttl_seconds=app_settings.session_ttl_seconds)
+    chat_message_sent_store = (
+        chat_message_sent_store or create_chat_message_sent_store(app_settings)
+    )
     unique_user_store = unique_user_store or create_unique_user_store(app_settings)
     if analytics_store is None and app_settings.analytics_enabled:
         analytics_store = LoggingAnalyticsStore()
@@ -207,6 +213,7 @@ def create_app(
             tenant=tenant,
             openai_client=openai_client,
             analytics_store=analytics_store,
+            chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
@@ -241,6 +248,7 @@ def create_app(
             tenant=tenant,
             openai_client=openai_client,
             analytics_store=analytics_store,
+            chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
@@ -259,6 +267,7 @@ async def generate_chat_response(
     tenant: TenantConfig,
     openai_client: httpx.AsyncClient | None,
     analytics_store: AnalyticsStore | None,
+    chat_message_sent_store: ChatMessageSentStore | None,
     unique_user_store: UniqueUserStore,
     session_id: str | None,
     message: str,
@@ -293,17 +302,21 @@ async def generate_chat_response(
         page_url=page_url,
     )
 
+    chat_message_sent_event = ChatMessageSentEvent(
+        tenant_id=tenant.tenant_id,
+        session_id=session.session_id,
+        origin=origin,
+        page_url=page_url,
+        occurred_at=occurred_at,
+        visitor_id=normalized_visitor_id,
+    )
+    await record_chat_message_sent(
+        chat_message_sent_store=chat_message_sent_store,
+        event=chat_message_sent_event,
+    )
+
     if analytics_store is not None:
-        analytics_store.record_chat_message_sent(
-            ChatMessageSentEvent(
-                tenant_id=tenant.tenant_id,
-                session_id=session.session_id,
-                origin=origin,
-                page_url=page_url,
-                occurred_at=occurred_at,
-                visitor_id=normalized_visitor_id,
-            )
-        )
+        analytics_store.record_chat_message_sent(chat_message_sent_event)
         if is_user_first_seen and normalized_visitor_id:
             analytics_store.record_user_first_seen(
                 UserFirstSeenEvent(
@@ -349,6 +362,17 @@ async def generate_chat_response(
     return ChatResponse(answer=result.answer, source=source, session_id=session.session_id)
 
 
+def create_chat_message_sent_store(settings: Settings) -> ChatMessageSentStore | None:
+    """Supabase設定があればチャット送信イベントをDBへ記録する。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabaseChatMessageSentStore(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return None
+
+
 def create_unique_user_store(settings: Settings) -> UniqueUserStore:
     """Supabase設定があればDB連携、なければプロセス内判定を使う。"""
     if settings.supabase_url and settings.supabase_service_role_key:
@@ -358,6 +382,22 @@ def create_unique_user_store(settings: Settings) -> UniqueUserStore:
             timeout_seconds=settings.supabase_timeout_seconds,
         )
     return InMemoryUniqueUserStore()
+
+
+async def record_chat_message_sent(
+    *,
+    chat_message_sent_store: ChatMessageSentStore | None,
+    event: ChatMessageSentEvent,
+) -> None:
+    """チャット送信イベントをDBへ記録する。失敗してもチャット処理は止めない。"""
+    if chat_message_sent_store is None:
+        return
+    try:
+        await chat_message_sent_store.record(event)
+    except Exception:
+        logging.getLogger("site_llm_bot.analytics").exception(
+            "failed to record chat message sent"
+        )
 
 
 async def mark_unique_user_seen(
