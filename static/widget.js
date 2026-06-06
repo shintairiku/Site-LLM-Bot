@@ -199,6 +199,35 @@
     return response.json();
   }
 
+  function recordRelatedLinkClick(linkUrl) {
+    requestRelatedLinkClick(linkUrl).catch(function () {
+      // クリック計測の失敗でユーザーの遷移を妨げない。
+    });
+  }
+
+  async function requestRelatedLinkClick(linkUrl) {
+    const response = await window.fetch(`${apiBase}/v1/analytics/related-link-click`, {
+      method: "POST",
+      keepalive: true,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tenant-Id": tenantId,
+        "X-Widget-Token": publicToken,
+      },
+      body: JSON.stringify({
+        link_url: linkUrl,
+        metadata: {
+          page_url: window.location.href,
+          visitor_id: visitorId,
+          session_id: sessionId,
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`related link click request failed: ${response.status}`);
+    }
+  }
+
   // 送信中の多重送信を防ぎ、入力部品の状態をまとめて切り替える。
   function setBusyState(textareaEl, submitButtonEl, suggestionsContainer, isBusy) {
     textareaEl.disabled = isBusy;
@@ -219,7 +248,7 @@
   // DOM 構造とスクロール制御を一か所で保守できる。
   function addMessage(container, role, text) {
     const node = createEmptyMessage(container, role);
-    appendLinkedText(node, text);
+    appendLinkedText(node, text, role);
     container.scrollTop = container.scrollHeight;
     return node;
   }
@@ -233,7 +262,7 @@
   }
 
   // 回答内のURLだけをアンカー化する。本文はtext nodeで追加し、HTMLとして解釈しない。
-  function appendLinkedText(node, text) {
+  function appendLinkedText(node, text, role) {
     const value = String(text);
     const urlPattern = /https?:\/\/[^\s<>"']+/g;
     let lastIndex = 0;
@@ -252,6 +281,12 @@
       anchor.textContent = url;
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";
+      if (role === "bot" && isRelatedLinkUrl(value, match.index)) {
+        anchor.dataset.siteLlmBotRelatedLink = "true";
+        anchor.addEventListener("click", function () {
+          recordRelatedLinkClick(url);
+        });
+      }
       node.appendChild(anchor);
       if (trailingText) {
         node.appendChild(document.createTextNode(trailingText));
@@ -262,6 +297,21 @@
     if (lastIndex < value.length) {
       node.appendChild(document.createTextNode(value.slice(lastIndex)));
     }
+  }
+
+  function isRelatedLinkUrl(text, urlIndex) {
+    const markers = ["関連リンク:", "関連リンク："];
+    const markerIndexes = markers
+      .map(function (marker) {
+        return text.indexOf(marker);
+      })
+      .filter(function (index) {
+        return index >= 0;
+      });
+    if (!markerIndexes.length) {
+      return false;
+    }
+    return urlIndex > Math.min.apply(null, markerIndexes);
   }
 
   // CSS の重複読み込みを避けつつ、script 設置だけでウィジェットを自己完結させるための関数。

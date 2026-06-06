@@ -40,6 +40,19 @@ class UserFirstSeenEvent:
     occurred_at: datetime
 
 
+@dataclass(slots=True)
+class RelatedLinkClickEvent:
+    """関連リンククリックイベント。"""
+
+    tenant_id: str
+    link_url: str
+    origin: str | None
+    page_url: str | None
+    clicked_at: datetime
+    visitor_id: str | None = None
+    session_id: str | None = None
+
+
 class AnalyticsStore:
     """記録処理のインターフェース。"""
 
@@ -57,6 +70,13 @@ class ChatMessageSentStore(Protocol):
 
     async def record(self, event: ChatMessageSentEvent) -> None:
         """チャットメッセージ送信イベントを永続化する。"""
+
+
+class RelatedLinkClickStore(Protocol):
+    """関連リンククリックイベントを永続化するストア。"""
+
+    async def record(self, event: RelatedLinkClickEvent) -> None:
+        """関連リンククリックイベントを永続化する。"""
 
 
 class LoggingAnalyticsStore(AnalyticsStore):
@@ -136,6 +156,60 @@ class SupabaseChatMessageSentStore:
             "p_origin": event.origin,
             "p_page_url": event.page_url,
             "p_occurred_at": event.occurred_at.isoformat(),
+        }
+        headers = {
+            "apikey": self._service_role_key,
+            "Content-Type": "application/json",
+        }
+        if not self._service_role_key.startswith("sb_secret_"):
+            headers["Authorization"] = f"Bearer {self._service_role_key}"
+
+        if self._client is not None:
+            response = await self._client.post(
+                self._rpc_url,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            return
+
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            response = await client.post(
+                self._rpc_url,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+
+
+class SupabaseRelatedLinkClickStore:
+    """Supabase RPC で関連リンククリックイベントを記録するストア。"""
+
+    def __init__(
+        self,
+        *,
+        supabase_url: str,
+        service_role_key: str,
+        timeout_seconds: float = 10.0,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._rpc_url = (
+            f"{supabase_url.rstrip('/')}/rest/v1/rpc/record_related_link_click"
+        )
+        self._service_role_key = service_role_key
+        self._timeout_seconds = timeout_seconds
+        self._client = client
+
+    async def record(self, event: RelatedLinkClickEvent) -> None:
+        """Supabaseに関連リンククリックイベントを記録する。"""
+        payload = {
+            "p_tenant_id": event.tenant_id,
+            "p_link_url": event.link_url,
+            "p_visitor_id": event.visitor_id,
+            "p_session_id": event.session_id,
+            "p_origin": event.origin,
+            "p_page_url": event.page_url,
+            "p_clicked_at": event.clicked_at.isoformat(),
         }
         headers = {
             "apikey": self._service_role_key,
