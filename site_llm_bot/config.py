@@ -36,6 +36,9 @@ class Settings:
     default_tenant_id: str
     tenants: dict[str, "TenantConfig"] = field(default_factory=dict)
     analytics_enabled: bool = False
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
+    supabase_timeout_seconds: float = 10.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -55,6 +58,12 @@ class Settings:
             default_tenant_id=tenant_settings.default_tenant_id,
             tenants=tenant_settings.tenants,
             analytics_enabled=parse_bool_env(os.getenv("ANALYTICS_ENABLED"), default=False),
+            supabase_url=normalize_optional_env(os.getenv("SUPABASE_URL")),
+            supabase_service_role_key=normalize_optional_env(
+                os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+                or os.getenv("SUPABASE_SECRET_KEY")
+            ),
+            supabase_timeout_seconds=float(os.getenv("SUPABASE_TIMEOUT_SECONDS", "10")),
         )
 
 
@@ -91,6 +100,14 @@ def parse_bool_env(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def normalize_optional_env(value: str | None) -> str | None:
+    """空文字の環境変数を None に寄せる。"""
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def load_tenant_settings(path: str) -> TenantSettings:

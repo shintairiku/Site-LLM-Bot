@@ -25,6 +25,7 @@ from site_llm_bot.services.analytics_store import (
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import ChatMessage
+from site_llm_bot.services.unique_user_store import SupabaseUniqueUserStore
 
 
 @pytest.fixture
@@ -143,6 +144,9 @@ def test_settings_reads_widget_api_base_from_env(
     monkeypatch.setenv("TENANT_CONFIG_PATH", str(tenant_config))
     monkeypatch.setenv("WIDGET_API_BASE", "https://dev-backend.example.com/")
     monkeypatch.setenv("ANALYTICS_ENABLED", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://project-ref.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.setenv("SUPABASE_TIMEOUT_SECONDS", "5")
     monkeypatch.delenv("OPENAI_TIMEOUT_SECONDS", raising=False)
 
     settings = Settings.from_env()
@@ -150,6 +154,94 @@ def test_settings_reads_widget_api_base_from_env(
     assert settings.widget_api_base == "https://dev-backend.example.com"
     assert settings.openai_timeout_seconds == 90.0
     assert settings.analytics_enabled is True
+    assert settings.supabase_url == "https://project-ref.supabase.co"
+    assert settings.supabase_service_role_key == "service-role-key"
+    assert settings.supabase_timeout_seconds == 5.0
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_calls_record_unique_user_rpc() -> None:
+    seen_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {
+            "p_tenant_id": "sample-shintairiku",
+            "p_visitor_id": "visitor-1",
+            "p_origin": "https://tenant-one.example.com",
+            "p_page_url": "https://tenant-one.example.com/reform",
+        }
+        assert request.headers["apikey"] == "service-role-key"
+        assert request.headers["authorization"] == "Bearer service-role-key"
+        return httpx.Response(200, json=True)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen(
+            "sample-shintairiku",
+            "visitor-1",
+            origin="https://tenant-one.example.com",
+            page_url="https://tenant-one.example.com/reform",
+        )
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is True
+    assert str(seen_requests[0].url) == (
+        "https://project-ref.supabase.co/rest/v1/rpc/record_unique_user"
+    )
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_returns_false_for_existing_user() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=False)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co/",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen("sample-shintairiku", "visitor-1")
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is False
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_omits_authorization_for_secret_key() -> None:
+    seen_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers)
+        return httpx.Response(200, json=True)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="sb_secret_test-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen("sample-shintairiku", "visitor-1")
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is True
+    assert seen_headers[0]["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in seen_headers[0]
 
 
 def test_logging_analytics_store_writes_structured_chat_message_event() -> None:
