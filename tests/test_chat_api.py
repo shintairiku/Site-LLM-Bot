@@ -21,7 +21,9 @@ from site_llm_bot.services.analytics_store import (
     ChatMessageSentEvent,
     JsonAnalyticsStore,
     LoggingAnalyticsStore,
+    RelatedLinkClickEvent,
     SupabaseChatMessageSentStore,
+    SupabaseRelatedLinkClickStore,
     UserFirstSeenEvent,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
@@ -113,6 +115,23 @@ class FailingChatMessageSentStore:
 
     async def record(self, event: ChatMessageSentEvent) -> None:
         raise RuntimeError("failed to write analytics")
+
+
+class RecordingRelatedLinkClickStore:
+    """テスト用に関連リンククリックイベントをメモリへ保持する。"""
+
+    def __init__(self) -> None:
+        self.events: list[RelatedLinkClickEvent] = []
+
+    async def record(self, event: RelatedLinkClickEvent) -> None:
+        self.events.append(event)
+
+
+class FailingRelatedLinkClickStore:
+    """テスト用に関連リンククリック記録失敗を発生させる。"""
+
+    async def record(self, event: RelatedLinkClickEvent) -> None:
+        raise RuntimeError("failed to write related link click")
 
 
 def test_default_tenant_uses_configured_allowed_domains() -> None:
@@ -332,6 +351,86 @@ async def test_supabase_chat_message_sent_store_omits_authorization_for_secret_k
                 origin=None,
                 page_url=None,
                 occurred_at=datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC),
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert seen_headers[0]["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in seen_headers[0]
+
+
+@pytest.mark.anyio
+async def test_supabase_related_link_click_store_calls_record_related_link_click_rpc() -> None:
+    seen_requests: list[httpx.Request] = []
+    clicked_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {
+            "p_tenant_id": "sample-shintairiku",
+            "p_link_url": "https://shintairiku.jp/company/",
+            "p_visitor_id": "visitor-1",
+            "p_session_id": "session-1",
+            "p_origin": "https://tenant-one.example.com",
+            "p_page_url": "https://tenant-one.example.com/reform",
+            "p_clicked_at": clicked_at.isoformat(),
+        }
+        assert request.headers["apikey"] == "service-role-key"
+        assert request.headers["authorization"] == "Bearer service-role-key"
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseRelatedLinkClickStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            RelatedLinkClickEvent(
+                tenant_id="sample-shintairiku",
+                link_url="https://shintairiku.jp/company/",
+                visitor_id="visitor-1",
+                session_id="session-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                clicked_at=clicked_at,
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert str(seen_requests[0].url) == (
+        "https://project-ref.supabase.co/rest/v1/rpc/record_related_link_click"
+    )
+
+
+@pytest.mark.anyio
+async def test_supabase_related_link_click_store_omits_authorization_for_secret_key() -> None:
+    seen_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers)
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseRelatedLinkClickStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="sb_secret_test-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            RelatedLinkClickEvent(
+                tenant_id="sample-shintairiku",
+                link_url="https://shintairiku.jp/company/",
+                origin=None,
+                page_url=None,
+                clicked_at=datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC),
             )
         )
     finally:
@@ -956,6 +1055,87 @@ async def test_v1_chat_message_with_mock_openai() -> None:
 
 
 @pytest.mark.anyio
+async def test_v1_related_link_click_records_allowed_link() -> None:
+    related_link_click_store = RecordingRelatedLinkClickStore()
+    app = create_app(
+        settings=build_settings(api_key=None),
+        related_link_click_store=related_link_click_store,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/v1/analytics/related-link-click",
+            headers=widget_headers(),
+            json={
+                "link_url": "https://www.shintairiku.jp/company/#detail",
+                "metadata": {
+                    "page_url": "https://tenant-one.example.com/reform",
+                    "visitor_id": "visitor-2",
+                    "session_id": "session-1",
+                },
+            },
+        )
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert len(related_link_click_store.events) == 1
+    event = related_link_click_store.events[0]
+    assert event.tenant_id == "sample-shintairiku"
+    assert event.link_url == "https://www.shintairiku.jp/company/"
+    assert event.visitor_id == "visitor-2"
+    assert event.session_id == "session-1"
+    assert event.origin == "https://tenant-one.example.com"
+    assert event.page_url == "https://tenant-one.example.com/reform"
+
+
+@pytest.mark.anyio
+async def test_v1_related_link_click_rejects_disallowed_link() -> None:
+    related_link_click_store = RecordingRelatedLinkClickStore()
+    app = create_app(
+        settings=build_settings(api_key=None),
+        related_link_click_store=related_link_click_store,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/v1/analytics/related-link-click",
+            headers=widget_headers(),
+            json={"link_url": "https://example.com/company/"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "link url is not allowed"
+    assert related_link_click_store.events == []
+
+
+@pytest.mark.anyio
+async def test_v1_related_link_click_continues_when_db_recording_fails() -> None:
+    app = create_app(
+        settings=build_settings(api_key=None),
+        related_link_click_store=FailingRelatedLinkClickStore(),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/v1/analytics/related-link-click",
+            headers=widget_headers(),
+            json={"link_url": "https://shintairiku.jp/company/"},
+        )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+@pytest.mark.anyio
 async def test_api_access_log_includes_required_fields(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1213,6 +1393,7 @@ def test_demo_and_static_routes_exist() -> None:
     assert "/v1/widget/config" in paths
     assert "/v1/chat/session" in paths
     assert "/v1/chat/message" in paths
+    assert "/v1/analytics/related-link-click" in paths
     assert "/v1/chat/stream" not in paths
 
 
@@ -1225,6 +1406,9 @@ def test_distribution_widget_assets_exist() -> None:
     assert (ROOT_DIR / "public" / "static" / "tenants" / "sample-shintairiku.css").exists()
 
     widget_js = (ROOT_DIR / "static" / "widget.js").read_text(encoding="utf-8")
+    public_widget_js = (ROOT_DIR / "public" / "static" / "widget.js").read_text(
+        encoding="utf-8"
+    )
     widget_css = (ROOT_DIR / "static" / "widget.css").read_text(encoding="utf-8")
     assert 'new URL("widget.css", baseUrl)' in widget_js
     assert 'new URL("tenants/", baseUrl)' in widget_js
@@ -1235,6 +1419,10 @@ def test_distribution_widget_assets_exist() -> None:
     assert "site-llm-bot-742231208085.asia-northeast1.run.app" in widget_js
     assert "ensureTenantCss(tenantId)" in widget_js
     assert "/v1/chat/message" in widget_js
+    assert "/v1/analytics/related-link-click" in widget_js
+    assert "/v1/analytics/related-link-click" in public_widget_js
+    assert "siteLlmBotRelatedLink" in widget_js
+    assert "siteLlmBotRelatedLink" in public_widget_js
     assert "/v1/chat/stream" not in widget_js
     assert "requestChatMessage" in widget_js
     assert "requestChatStream" not in widget_js
