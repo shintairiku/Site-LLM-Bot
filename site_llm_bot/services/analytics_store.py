@@ -1,12 +1,31 @@
 import json
 import logging
+import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 import httpx
+
+_PII_PATTERNS: list[re.Pattern[str]] = [
+    # クレジットカード番号（16桁、ハイフン・スペース区切り含む）— 郵便番号より先に評価
+    re.compile(r"\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}"),
+    # メールアドレス
+    re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", re.IGNORECASE),
+    # 電話番号（日本形式: 03-1234-5678 / 090-1234-5678 / 0120-123-456 等）
+    re.compile(r"0\d{1,4}[\s\-()]?\d{1,4}[\s\-]?\d{4}"),
+    # 郵便番号（〒123-4567）
+    re.compile(r"〒?\s*\d{3}[\s\-]\d{4}"),
+]
+
+
+def mask_pii(text: str) -> str:
+    """テキスト中の個人情報をマスクして返す。"""
+    for pattern in _PII_PATTERNS:
+        text = pattern.sub("[MASKED]", text)
+    return text
 
 ANALYTICS_LOGGER = logging.getLogger("site_llm_bot.analytics")
 ANALYTICS_LOGGER.setLevel(logging.INFO)
@@ -27,6 +46,7 @@ class ChatMessageSentEvent:
     page_url: str | None
     occurred_at: datetime
     visitor_id: str | None = None
+    question_text: str | None = None
 
 
 @dataclass(slots=True)
@@ -156,6 +176,7 @@ class SupabaseChatMessageSentStore:
             "p_origin": event.origin,
             "p_page_url": event.page_url,
             "p_occurred_at": event.occurred_at.isoformat(),
+            "p_question_text": event.question_text,
         }
         headers = {
             "apikey": self._service_role_key,
@@ -246,6 +267,7 @@ def build_chat_message_sent_payload(event: ChatMessageSentEvent) -> dict[str, st
         "origin": event.origin,
         "page_url": event.page_url,
         "occurred_at": event.occurred_at.isoformat(),
+        "question_text": event.question_text,
     }
 
 
