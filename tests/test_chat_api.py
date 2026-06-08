@@ -25,6 +25,7 @@ from site_llm_bot.services.analytics_store import (
     SupabaseChatMessageSentStore,
     SupabaseRelatedLinkClickStore,
     UserFirstSeenEvent,
+    mask_pii,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import ChatMessage
@@ -296,6 +297,7 @@ async def test_supabase_chat_message_sent_store_calls_record_chat_message_sent_r
             "p_origin": "https://tenant-one.example.com",
             "p_page_url": "https://tenant-one.example.com/reform",
             "p_occurred_at": occurred_at.isoformat(),
+            "p_question_text": "リフォームの費用はいくらですか？",
         }
         assert request.headers["apikey"] == "service-role-key"
         assert request.headers["authorization"] == "Bearer service-role-key"
@@ -317,6 +319,7 @@ async def test_supabase_chat_message_sent_store_calls_record_chat_message_sent_r
                 origin="https://tenant-one.example.com",
                 page_url="https://tenant-one.example.com/reform",
                 occurred_at=occurred_at,
+                question_text="リフォームの費用はいくらですか？",
             )
         )
     finally:
@@ -472,6 +475,7 @@ def test_logging_analytics_store_writes_structured_chat_message_event() -> None:
         "origin": "https://tenant-one.example.com",
         "page_url": "https://tenant-one.example.com/reform",
         "occurred_at": occurred_at.isoformat(),
+        "question_text": None,
         "message": "chat_message_sent",
         "severity": "INFO",
     }
@@ -538,6 +542,7 @@ def test_json_analytics_store_writes_chat_message_event(tmp_path: Path) -> None:
         "origin": "https://tenant-one.example.com",
         "page_url": "https://tenant-one.example.com/reform",
         "occurred_at": occurred_at.isoformat(),
+        "question_text": None,
     }
 
 
@@ -1451,6 +1456,24 @@ async def test_demo_page_uses_same_origin_widget_and_configured_api_base() -> No
     assert "data-color" not in response.text
     assert "site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js" not in response.text
     assert "__WIDGET_API_BASE__" not in response.text
+
+
+@pytest.mark.parametrize("text,expected", [
+    # メールアドレス
+    ("連絡先はtaro@example.comです", "連絡先は[MASKED]です"),
+    # 電話番号（ハイフン区切り）
+    ("電話は090-1234-5678まで", "電話は[MASKED]まで"),
+    # 電話番号（固定電話）
+    ("03-1234-5678に連絡", "[MASKED]に連絡"),
+    # 郵便番号（〒含む）
+    ("〒123-4567に住んでいます", "[MASKED]に住んでいます"),
+    # クレジットカード番号
+    ("カード番号は1234-5678-9012-3456です", "カード番号は[MASKED]です"),
+    # PII なし（変換なし）
+    ("リフォームの費用はいくらですか？", "リフォームの費用はいくらですか？"),
+])
+def test_mask_pii(text: str, expected: str) -> None:
+    assert mask_pii(text) == expected
 
 
 @pytest.mark.anyio

@@ -27,6 +27,7 @@ from site_llm_bot.services.analytics_store import (
     SupabaseChatMessageSentStore,
     SupabaseRelatedLinkClickStore,
     UserFirstSeenEvent,
+    mask_pii,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
@@ -372,6 +373,7 @@ async def generate_chat_response(
         page_url=page_url,
         occurred_at=occurred_at,
         visitor_id=normalized_visitor_id,
+        question_text=mask_pii(normalized_message),
     )
     await record_chat_message_sent(
         chat_message_sent_store=chat_message_sent_store,
