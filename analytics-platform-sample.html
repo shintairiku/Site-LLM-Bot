@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>チャットボット管理画面</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --blue-900:#0b2545; --blue-800:#13315c; --blue-700:#1e40af; --blue-600:#2563eb;
+    --blue-500:#3b82f6; --blue-100:#dbeafe; --blue-50:#eff6ff;
+    --gray-50:#f8fafc; --gray-100:#f1f5f9; --gray-200:#e2e8f0; --gray-300:#cbd5e1;
+    --gray-500:#64748b; --gray-700:#334155; --gray-900:#0f172a;
+    --green:#16a34a; --amber:#d97706; --red:#dc2626;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,system-ui,sans-serif;color:var(--gray-900);background:var(--gray-50);}
+  .app{display:flex;height:100vh;overflow:hidden;}
+
+  /* Sidebar */
+  .sidebar{width:220px;background:linear-gradient(180deg,var(--blue-900),var(--blue-800));color:#fff;display:flex;flex-direction:column;flex-shrink:0;}
+  .brand{padding:20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,.1);}
+  .brand .logo{width:30px;height:30px;border-radius:8px;background:var(--blue-500);display:flex;align-items:center;justify-content:center;font-weight:700;}
+  .brand .name{font-weight:700;font-size:15px;}
+  .brand .sub{font-size:11px;color:#9fb3d1;}
+  .nav{flex:1;padding:14px 12px;display:flex;flex-direction:column;gap:4px;}
+  .nav-item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;cursor:pointer;color:#cdd9ed;font-size:14px;transition:.15s;}
+  .nav-item:hover{background:rgba(255,255,255,.08);color:#fff;}
+  .nav-item.active{background:var(--blue-600);color:#fff;font-weight:600;}
+  .nav-item .ic{width:18px;text-align:center;}
+  .nav-bottom{padding:12px;border-top:1px solid rgba(255,255,255,.1);}
+
+  /* Main */
+  .main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+  .topbar{height:60px;background:#fff;border-bottom:1px solid var(--gray-200);display:flex;align-items:center;justify-content:space-between;padding:0 24px;flex-shrink:0;}
+  .topbar h1{font-size:18px;font-weight:700;}
+  .topbar .crumb{font-size:12px;color:var(--gray-500);margin-top:2px;}
+  .top-right{display:flex;align-items:center;gap:16px;position:relative;}
+  .client-pill{display:flex;align-items:center;gap:8px;background:var(--blue-50);border:1px solid var(--blue-100);color:var(--blue-700);padding:7px 12px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;}
+  .avatar{width:38px;height:38px;border-radius:50%;background:var(--blue-600);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;cursor:pointer;border:2px solid var(--blue-100);}
+  .menu{position:absolute;top:50px;right:0;background:#fff;border:1px solid var(--gray-200);border-radius:12px;box-shadow:0 10px 30px rgba(2,32,71,.15);width:230px;padding:8px;display:none;z-index:50;}
+  .menu.open{display:block;}
+  .menu .mhead{padding:10px 12px;border-bottom:1px solid var(--gray-100);margin-bottom:6px;}
+  .menu .mhead b{display:block;font-size:14px;}
+  .menu .mhead span{font-size:12px;color:var(--gray-500);}
+  .menu a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;font-size:13px;color:var(--gray-700);text-decoration:none;cursor:pointer;}
+  .menu a:hover{background:var(--gray-100);}
+  .menu a.danger{color:var(--red);}
+
+  .content{flex:1;overflow:auto;padding:24px;}
+  .tab{display:none;}
+  .tab.active{display:block;animation:fade .2s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  /* Generic */
+  .card{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:20px;}
+  .card+.card{margin-top:18px;}
+  .row{display:flex;gap:18px;}
+  .col{flex:1;min-width:0;}
+  .section-title{font-size:15px;font-weight:700;margin-bottom:4px;}
+  .section-sub{font-size:12px;color:var(--gray-500);margin-bottom:16px;}
+  .btn{border:none;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px;}
+  .btn-primary{background:var(--blue-600);color:#fff;}
+  .btn-primary:hover{background:var(--blue-700);}
+  .btn-ghost{background:var(--gray-100);color:var(--gray-700);}
+  .btn-ghost:hover{background:var(--gray-200);}
+  .btn-outline{background:#fff;border:1px solid var(--gray-300);color:var(--gray-700);}
+  label.fl{display:block;font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:6px;}
+  input.fi,select.fi,textarea.fi{width:100%;border:1px solid var(--gray-300);border-radius:9px;padding:10px 12px;font-size:13px;font-family:inherit;background:#fff;}
+  textarea.fi{resize:vertical;line-height:1.6;}
+  input.fi:focus,textarea.fi:focus,select.fi:focus{outline:none;border-color:var(--blue-500);box-shadow:0 0 0 3px var(--blue-100);}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:12px;}
+  .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;}
+  .badge.ok{background:#dcfce7;color:var(--green);}
+  .badge.wait{background:#fef3c7;color:var(--amber);}
+  .badge.err{background:#fee2e2;color:var(--red);}
+  .badge.blue{background:var(--blue-100);color:var(--blue-700);}
+
+  /* Prompt tab */
+  .prompt-grid{display:grid;grid-template-columns:1fr 320px;gap:18px;}
+  .history{list-style:none;}
+  .history li{position:relative;padding:0 0 18px 22px;border-left:2px solid var(--gray-200);}
+  .history li:last-child{border-left-color:transparent;padding-bottom:0;}
+  .history li::before{content:"";position:absolute;left:-7px;top:2px;width:12px;height:12px;border-radius:50%;background:var(--blue-500);border:2px solid #fff;box-shadow:0 0 0 2px var(--blue-100);}
+  .history .h-meta{font-size:11px;color:var(--gray-500);}
+  .history .h-title{font-size:13px;font-weight:600;margin:2px 0 4px;}
+  .history .h-note{font-size:12px;color:var(--gray-700);background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:8px 10px;}
+  .history .h-act{font-size:11px;color:var(--blue-600);cursor:pointer;margin-top:6px;display:inline-block;}
+
+  /* Data tab */
+  .source-type{display:flex;gap:10px;margin-bottom:16px;}
+  .stype{flex:1;border:1px solid var(--gray-300);border-radius:10px;padding:14px;text-align:center;cursor:pointer;font-size:13px;}
+  .stype.active{border-color:var(--blue-600);background:var(--blue-50);color:var(--blue-700);font-weight:700;}
+  .stype .ic{font-size:20px;display:block;margin-bottom:6px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{text-align:left;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.04em;padding:10px 12px;border-bottom:1px solid var(--gray-200);}
+  tbody td{padding:12px;border-bottom:1px solid var(--gray-100);vertical-align:middle;}
+  tbody tr:hover{background:var(--gray-50);}
+  .tname{display:flex;align-items:center;gap:10px;font-weight:600;}
+  .ticon{width:30px;height:30px;border-radius:8px;background:var(--blue-50);color:var(--blue-600);display:flex;align-items:center;justify-content:center;}
+  .ico-act{color:var(--gray-500);cursor:pointer;padding:4px 6px;border-radius:6px;}
+  .ico-act:hover{background:var(--gray-100);}
+
+  /* Analysis */
+  .period{display:inline-flex;background:var(--gray-100);border-radius:9px;padding:3px;}
+  .period button{border:none;background:transparent;padding:7px 16px;border-radius:7px;font-size:13px;cursor:pointer;color:var(--gray-500);font-weight:600;}
+  .period button.active{background:#fff;color:var(--blue-700);box-shadow:0 1px 3px rgba(0,0,0,.08);}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px;}
+  .kpi{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:18px;}
+  .kpi .k-label{font-size:12px;color:var(--gray-500);}
+  .kpi .k-val{font-size:26px;font-weight:800;margin:6px 0 2px;}
+  .kpi .k-delta{font-size:12px;font-weight:600;}
+  .k-delta.up{color:var(--green);}
+  .k-delta.down{color:var(--red);}
+  .qa-q{font-weight:600;}
+  .qa-a{color:var(--gray-500);font-size:12px;margin-top:3px;max-width:520px;}
+
+  .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  .switch{width:42px;height:24px;border-radius:999px;background:var(--gray-300);position:relative;cursor:pointer;transition:.2s;}
+  .switch.on{background:var(--blue-600);}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;}
+  .switch.on::after{left:21px;}
+  .set-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--gray-100);}
+  .set-row .t{font-size:13px;font-weight:600;}
+  .set-row .d{font-size:12px;color:var(--gray-500);}
+  @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.prompt-grid,.settings-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">B</div>
+      <div><div class="name">BotConsole</div><div class="sub">管理ダッシュボード</div></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item active" data-tab="prompt"><span class="ic">✏️</span>プロンプト</div>
+      <div class="nav-item" data-tab="data"><span class="ic">🗂️</span>データ</div>
+      <div class="nav-item" data-tab="analytics"><span class="ic">📊</span>分析</div>
+    </nav>
+    <div class="nav-bottom">
+      <div class="nav-item" data-tab="settings"><span class="ic">⚙️</span>設定</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">プロンプト</h1>
+        <div class="crumb" id="pageCrumb">チャットボットの標準プロンプトを管理</div>
+      </div>
+      <div class="top-right">
+        <div class="client-pill" onclick="toggleClientMenu()">🏢 <span id="clientName">株式会社サンプル</span> ▾</div>
+        <div class="avatar" onclick="toggleMenu()">北</div>
+        <div class="menu" id="profileMenu">
+          <div class="mhead"><b>北岡</b><span>hayatobasuke110@gmail.com</span></div>
+          <a onclick="openProfile('name')">👤 名前を変更</a>
+          <a onclick="openProfile('email')">✉️ メールアドレスを変更</a>
+          <a onclick="openProfile('password')">🔒 パスワードを変更</a>
+          <a class="danger" onclick="alert('ログアウトしました（デモ）')">⎋ ログアウト</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- ===== PROMPT TAB ===== -->
+      <section class="tab active" id="tab-prompt">
+        <div class="toolbar">
+          <div>
+            <div class="section-title">標準プロンプト</div>
+            <div class="section-sub">このクライアントのチャットボットに常時適用される指示文</div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn btn-ghost">プレビュー</button>
+            <button class="btn btn-primary" onclick="alert('保存しました（デモ）')">💾 保存</button>
+          </div>
+        </div>
+        <div class="prompt-grid">
+          <div class="card">
+            <label class="fl">プロンプト本文</label>
+            <textarea class="fi" rows="14">ユーザーの質問に正確に回答してください。
+わからない場合は「不明」と答えてください。
+回答の際は、参照したページのURLを必ず記載してください。
+回答の最後に、イベントページへの案内を自然に添えてください。
+丁寧でフレンドリーなトーンを保ってください。</textarea>
+            <div style="display:flex;gap:14px;margin-top:14px;">
+              <div class="col"><label class="fl">トーン</label>
+                <select class="fi"><option>丁寧・フレンドリー</option><option>フォーマル</option><option>カジュアル</option></select></div>
+              <div class="col"><label class="fl">回答の最大文字数</label>
+                <input class="fi" value="400"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="section-title" style="margin-bottom:14px;">変更履歴</div>
+            <ul class="history">
+              <li>
+                <div class="h-meta">2026/06/08 14:22 ・ 北岡</div>
+                <div class="h-title">イベント案内の文言を追加</div>
+                <div class="h-note">「最後にイベントページへ案内」を追記</div>
+                <span class="h-act" onclick="alert('この版を復元（デモ）')">この版に戻す</span>
+              </li>
+              <li>
+                <div class="h-meta">2026/06/01 09:10 ・ 田中</div>
+                <div class="h-title">不明時の挙動を明確化</div>
+                <div class="h-note">「わからない場合は不明と答える」を追加</div>
+                <span class="h-act" onclick="alert('この版を復元（デモ）')">この版に戻す</span>
+              </li>
+              <li>
+                <div class="h-meta">2026/05/20 17:45 ・ 北岡</div>
+                <div class="h-title">初版作成</div>
+                <div class="h-note">基本の回答方針を設定</div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== DATA TAB ===== -->
+      <section class="tab" id="tab-data">
+        <div class="row">
+          <div class="card" style="flex:0 0 340px;">
+            <div class="section-title">データソースを追加</div>
+            <div class="section-sub">チャットボットが参照する情報源</div>
+            <div class="source-type">
+              <div class="stype active" data-st="url" onclick="selStype(this)"><span class="ic">🔗</span>URL</div>
+              <div class="stype" data-st="pdf" onclick="selStype(this)"><span class="ic">📄</span>PDF</div>
+              <div class="stype" data-st="text" onclick="selStype(this)"><span class="ic">📝</span>テキスト</div>
+            </div>
+            <div id="st-url">
+              <label class="fl">会社サイトのURL</label>
+              <input class="fi" placeholder="https://example.co.jp">
+              <p style="font-size:11px;color:var(--gray-500);margin-top:6px;">配下のページを自動クロールします</p>
+            </div>
+            <div id="st-pdf" style="display:none;">
+              <label class="fl">PDFをアップロード</label>
+              <div class="fi" style="text-align:center;padding:26px;border-style:dashed;color:var(--gray-500);cursor:pointer;">📄 ドラッグ＆ドロップ<br>または クリックして選択</div>
+            </div>
+            <div id="st-text" style="display:none;">
+              <label class="fl">直書きテキスト</label>
+              <textarea class="fi" rows="5" placeholder="FAQや補足情報を直接入力"></textarea>
+            </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:16px;justify-content:center;" onclick="alert('データソースを追加しました（デモ）')">＋ 追加する</button>
+          </div>
+
+          <div class="card col">
+            <div class="toolbar">
+              <div class="section-title">登録済みデータソース</div>
+              <span class="badge blue">4件</span>
+            </div>
+            <table>
+              <thead><tr><th>ソース</th><th>種別</th><th>ステータス</th><th>更新日</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><div class="tname"><div class="ticon">🔗</div>example.co.jp</div></td><td>URL（128ページ）</td><td><span class="badge ok">同期済み</span></td><td>2026/06/08</td><td><span class="ico-act">⋯</span></td></tr>
+                <tr><td><div class="tname"><div class="ticon">📄</div>料金プラン_2026.pdf</div></td><td>PDF</td><td><span class="badge ok">同期済み</span></td><td>2026/06/05</td><td><span class="ico-act">⋯</span></td></tr>
+                <tr><td><div class="tname"><div class="ticon">📄</div>サービス概要.pdf</div></td><td>PDF</td><td><span class="badge wait">処理中</span></td><td>2026/06/09</td><td><span class="ico-act">⋯</span></td></tr>
+                <tr><td><div class="tname"><div class="ticon">📝</div>よくある質問（手入力）</div></td><td>テキスト</td><td><span class="badge ok">同期済み</span></td><td>2026/05/30</td><td><span class="ico-act">⋯</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== ANALYTICS TAB ===== -->
+      <section class="tab" id="tab-analytics">
+        <div class="toolbar">
+          <div>
+            <div class="section-title">チャットボット分析</div>
+            <div class="section-sub">利用状況とパフォーマンスの推移</div>
+          </div>
+          <div class="period">
+            <button onclick="setPeriod(this,'日')">日</button>
+            <button class="active" onclick="setPeriod(this,'週')">週</button>
+            <button onclick="setPeriod(this,'月')">月</button>
+          </div>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi"><div class="k-label">チャット送信回数</div><div class="k-val">3,482</div><div class="k-delta up">▲ 12.4%</div></div>
+          <div class="kpi"><div class="k-label">利用ユーザー数</div><div class="k-val">1,067</div><div class="k-delta up">▲ 8.1%</div></div>
+          <div class="kpi"><div class="k-label">URL遷移数</div><div class="k-val">624</div><div class="k-delta up">▲ 15.0%</div></div>
+          <div class="kpi"><div class="k-label">解決率（不明回答以外）</div><div class="k-val">87%</div><div class="k-delta down">▼ 1.2%</div></div>
+        </div>
+
+        <div class="row">
+          <div class="card col"><div class="section-title" style="margin-bottom:14px;">送信回数・ユーザー数の推移</div><canvas id="trendChart" height="120"></canvas></div>
+          <div class="card" style="flex:0 0 320px;"><div class="section-title" style="margin-bottom:14px;">URL遷移の内訳</div><canvas id="urlChart" height="200"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="toolbar"><div class="section-title">個々の質問と回答</div><button class="btn btn-outline">CSV出力</button></div>
+          <table>
+            <thead><tr><th>日時</th><th>質問 / 回答</th><th>遷移先</th><th>評価</th></tr></thead>
+            <tbody>
+              <tr><td>06/09 11:03</td><td><div class="qa-q">料金プランの違いは？</div><div class="qa-a">スタンダードとプロの差分を説明し、料金ページURLを案内しました。</div></td><td><span class="badge blue">料金ページ</span></td><td><span class="badge ok">👍 役立った</span></td></tr>
+              <tr><td>06/09 10:41</td><td><div class="qa-q">セミナーはいつ？</div><div class="qa-a">6/20開催を案内し、イベントページへ誘導しました。</div></td><td><span class="badge blue">イベントページ</span></td><td><span class="badge ok">👍 役立った</span></td></tr>
+              <tr><td>06/09 09:58</td><td><div class="qa-q">返金は可能ですか？</div><div class="qa-a">該当情報が見つからず「不明」と回答しました。</div></td><td>—</td><td><span class="badge err">👎 未解決</span></td></tr>
+              <tr><td>06/08 18:22</td><td><div class="qa-q">導入事例を知りたい</div><div class="qa-a">事例記事3件のURLを提示しました。</div></td><td><span class="badge blue">参考記事</span></td><td><span class="badge ok">👍 役立った</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== SETTINGS TAB ===== -->
+      <section class="tab" id="tab-settings">
+        <div class="settings-grid">
+          <div class="card">
+            <div class="section-title">一般設定</div>
+            <div class="section-sub">チャットボットの基本動作</div>
+            <div class="set-row"><div><div class="t">チャットボットを公開</div><div class="d">サイト埋め込みを有効化</div></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+            <div class="set-row"><div><div class="t">営業時間外メッセージ</div><div class="d">時間外に自動応答を表示</div></div><div class="switch" onclick="this.classList.toggle('on')"></div></div>
+            <div class="set-row"><div><div class="t">未解決時にメール通知</div><div class="d">「不明」回答を担当者へ通知</div></div><div class="switch on" onclick="this.classList.toggle('on')"></div></div>
+            <div class="set-row" style="border-bottom:none;"><div><div class="t">対応言語</div></div><select class="fi" style="width:160px;"><option>日本語</option><option>日本語 + 英語</option></select></div>
+          </div>
+          <div class="card">
+            <div class="section-title">表示・ブランディング</div>
+            <div class="section-sub">ウィジェットの見た目</div>
+            <div style="margin:14px 0;"><label class="fl">ウィジェット名</label><input class="fi" value="サポートボット"></div>
+            <div style="margin:14px 0;"><label class="fl">テーマカラー</label><input class="fi" type="color" value="#2563eb" style="height:42px;padding:4px;"></div>
+            <div style="margin:14px 0;"><label class="fl">あいさつメッセージ</label><input class="fi" value="こんにちは！何かお手伝いできますか？"></div>
+            <button class="btn btn-primary" onclick="alert('設定を保存しました（デモ）')">💾 保存</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title">埋め込みコード</div>
+          <div class="section-sub">クライアントの会社HPに貼り付けるスニペット</div>
+          <textarea class="fi" rows="2" readonly style="font-family:monospace;font-size:12px;">&lt;script src="https://cdn.botconsole.io/widget.js" data-client="sample-co"&gt;&lt;/script&gt;</textarea>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// Tab switching
+const titles={prompt:['プロンプト','チャットボットの標準プロンプトを管理'],data:['データ','参照データソースの登録・管理'],analytics:['分析','利用状況とパフォーマンスの分析'],settings:['設定','チャットボットと表示の設定']};
+document.querySelectorAll('.nav-item').forEach(n=>n.addEventListener('click',()=>{
+  const t=n.dataset.tab;
+  document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+  n.classList.add('active');
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.getElementById('tab-'+t).classList.add('active');
+  document.getElementById('pageTitle').textContent=titles[t][0];
+  document.getElementById('pageCrumb').textContent=titles[t][1];
+  if(t==='analytics')setTimeout(drawCharts,50);
+}));
+
+// Profile menu
+function toggleMenu(){document.getElementById('profileMenu').classList.toggle('open');}
+function toggleClientMenu(){const n=['株式会社サンプル','ABC商事','グリーンテック株式会社'];const c=document.getElementById('clientName');c.textContent=n[(n.indexOf(c.textContent)+1)%n.length];}
+function openProfile(k){const m={name:'名前の変更',email:'メールアドレスの変更',password:'パスワードの変更'};alert(m[k]+'画面を開きます（デモ）');document.getElementById('profileMenu').classList.remove('open');}
+document.addEventListener('click',e=>{if(!e.target.closest('.top-right'))document.getElementById('profileMenu').classList.remove('open');});
+
+// Data source type
+function selStype(el){document.querySelectorAll('.stype').forEach(s=>s.classList.remove('active'));el.classList.add('active');['url','pdf','text'].forEach(t=>document.getElementById('st-'+t).style.display='none');document.getElementById('st-'+el.dataset.st).style.display='block';}
+
+// Period
+function setPeriod(btn){document.querySelectorAll('.period button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');drawCharts();}
+
+// Charts
+let trendC,urlC;
+function drawCharts(){
+  const t=document.getElementById('trendChart'),u=document.getElementById('urlChart');
+  if(!t||!u)return;
+  if(trendC)trendC.destroy(); if(urlC)urlC.destroy();
+  const labels=['月','火','水','木','金','土','日'];
+  trendC=new Chart(t,{type:'line',data:{labels,datasets:[
+    {label:'送信回数',data:[420,510,480,560,610,330,290],borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.1)',fill:true,tension:.35},
+    {label:'ユーザー数',data:[150,180,170,200,220,120,110],borderColor:'#3b82f6',borderDash:[5,4],tension:.35}
+  ]},options:{plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true}}}});
+  urlC=new Chart(u,{type:'doughnut',data:{labels:['イベントページ','料金ページ','参考記事','資料DL'],datasets:[{data:[260,180,120,64],backgroundColor:['#1e40af','#2563eb','#3b82f6','#93c5fd']}]},options:{plugins:{legend:{position:'bottom'}}}});
+}
+</script>
+</body>
+</html>
