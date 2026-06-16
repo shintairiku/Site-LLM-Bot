@@ -124,6 +124,16 @@
   .set-row .t{font-size:13px;font-weight:600;}
   .set-row .d{font-size:12px;color:var(--gray-500);}
   @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.prompt-grid,.settings-grid{grid-template-columns:1fr}}
+
+  /* Links tab */
+  .links-grid{display:grid;grid-template-columns:340px 1fr;gap:18px;}
+  .link-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .link-row .fi{flex:1;}
+  .color-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+  .link-cat-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-100);color:var(--blue-700);}
+  .link-url{font-size:12px;color:var(--gray-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px;}
+  .empty-state{text-align:center;padding:40px 0;color:var(--gray-500);font-size:13px;}
+  @media(max-width:1000px){.links-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -137,6 +147,7 @@
     <nav class="nav">
       <div class="nav-item active" data-tab="prompt"><span class="ic">✏️</span>プロンプト</div>
       <div class="nav-item" data-tab="data"><span class="ic">🗂️</span>データ</div>
+      <div class="nav-item" data-tab="links"><span class="ic">🔗</span>関連リンク候補</div>
       <div class="nav-item" data-tab="analytics"><span class="ic">📊</span>分析</div>
     </nav>
     <div class="nav-bottom">
@@ -263,6 +274,68 @@
         </div>
       </section>
 
+      <!-- ===== LINKS TAB ===== -->
+      <section class="tab" id="tab-links">
+        <div class="links-grid">
+          <div class="card">
+            <div class="section-title">リンク候補を追加</div>
+            <div class="section-sub">チャットボットが回答に含めるリンクをカテゴリ別に登録</div>
+            <div style="margin-bottom:12px;">
+              <label class="fl">カテゴリ名</label>
+              <input class="fi" placeholder="例：料金ページ、イベント情報">
+            </div>
+            <div style="margin-bottom:16px;">
+              <label class="fl">URL</label>
+              <input class="fi" placeholder="https://example.co.jp/pricing">
+            </div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;">＋ 追加する</button>
+
+            <div style="margin-top:24px;">
+              <div class="section-title" style="margin-bottom:8px;">カテゴリの色分け</div>
+              <div class="section-sub">分析グラフの色はカテゴリ登録順に自動割り当てられます</div>
+              <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+                <div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#1e40af;"></div><span style="font-size:12px;font-weight:600;">登録カテゴリー1</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#2563eb;"></div><span style="font-size:12px;font-weight:600;">登録カテゴリー2</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#3b82f6;"></div><span style="font-size:12px;font-weight:600;">登録カテゴリー3</span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#93c5fd;"></div><span style="font-size:12px;font-weight:600;">登録カテゴリー4</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card col">
+            <div class="toolbar">
+              <div class="section-title">登録済みリンク候補</div>
+              <span class="badge blue">4件</span>
+            </div>
+            <table>
+              <thead><tr><th>カテゴリ</th><th>URL</th><th></th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#1e40af;"></div><span class="link-cat-badge">登録カテゴリー1</span></div></td>
+                  <td><span class="link-url">https://example.co.jp/page1</span></td>
+                  <td><span class="ico-act">🗑️</span></td>
+                </tr>
+                <tr>
+                  <td><div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#2563eb;"></div><span class="link-cat-badge">登録カテゴリー2</span></div></td>
+                  <td><span class="link-url">https://example.co.jp/page2</span></td>
+                  <td><span class="ico-act">🗑️</span></td>
+                </tr>
+                <tr>
+                  <td><div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#3b82f6;"></div><span class="link-cat-badge">登録カテゴリー3</span></div></td>
+                  <td><span class="link-url">https://example.co.jp/page3</span></td>
+                  <td><span class="ico-act">🗑️</span></td>
+                </tr>
+                <tr>
+                  <td><div style="display:flex;align-items:center;gap:8px;"><div class="color-dot" style="background:#93c5fd;"></div><span class="link-cat-badge">登録カテゴリー4</span></div></td>
+                  <td><span class="link-url">https://example.co.jp/page4</span></td>
+                  <td><span class="ico-act">🗑️</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- ===== ANALYTICS TAB ===== -->
       <section class="tab" id="tab-analytics">
         <div class="toolbar">
@@ -336,7 +409,7 @@
 
 <script>
 // Tab switching
-const titles={prompt:['プロンプト','チャットボットの標準プロンプトを管理'],data:['データ','参照データソースの登録・管理'],analytics:['分析','利用状況とパフォーマンスの分析'],settings:['設定','チャットボットと表示の設定']};
+const titles={prompt:['プロンプト','チャットボットの標準プロンプトを管理'],data:['データ','参照データソースの登録・管理'],links:['関連リンク候補','チャットボットの回答に含めるリンクを管理'],analytics:['分析','利用状況とパフォーマンスの分析'],settings:['設定','チャットボットと表示の設定']};
 document.querySelectorAll('.nav-item').forEach(n=>n.addEventListener('click',()=>{
   const t=n.dataset.tab;
   document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
@@ -371,7 +444,7 @@ function drawCharts(){
     {label:'送信回数',data:[420,510,480,560,610,330,290],borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.1)',fill:true,tension:.35},
     {label:'ユーザー数',data:[150,180,170,200,220,120,110],borderColor:'#3b82f6',borderDash:[5,4],tension:.35}
   ]},options:{plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true}}}});
-  urlC=new Chart(u,{type:'doughnut',data:{labels:['イベントページ','料金ページ','参考記事','資料DL'],datasets:[{data:[260,180,120,64],backgroundColor:['#1e40af','#2563eb','#3b82f6','#93c5fd']}]},options:{plugins:{legend:{position:'bottom'}}}});
+  urlC=new Chart(u,{type:'doughnut',data:{labels:['登録カテゴリー1','登録カテゴリー2','登録カテゴリー3','登録カテゴリー4'],datasets:[{data:[260,180,120,64],backgroundColor:['#1e40af','#2563eb','#3b82f6','#93c5fd']}]},options:{plugins:{legend:{position:'bottom'}}}});
 }
 </script>
 </body>
