@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 const pageMeta: Record<string, { title: string; crumb: string }> = {
   "/prompt": { title: "プロンプト", crumb: "チャットボットの標準プロンプトを管理" },
@@ -10,11 +11,23 @@ const pageMeta: Record<string, { title: string; crumb: string }> = {
   "/settings": { title: "設定", crumb: "チャットボットと表示の設定" },
 };
 
-export default function Topbar() {
+interface TopbarProps {
+  userEmail: string | null;
+}
+
+export default function Topbar({ userEmail }: TopbarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const meta = pageMeta[pathname] ?? { title: "BotConsole", crumb: "" };
+  const initial = userEmail ? userEmail[0].toUpperCase() : "?";
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   return (
     <header
@@ -30,18 +43,7 @@ export default function Topbar() {
 
       <div className="flex items-center gap-4 relative">
         <div
-          className="flex items-center gap-2 px-3 py-[7px] rounded-full text-[13px] font-semibold cursor-pointer"
-          style={{
-            background: "var(--blue-50)",
-            border: "1px solid var(--blue-100)",
-            color: "var(--blue-700)",
-          }}
-        >
-          🏢 <span>テナント名</span> ▾
-        </div>
-
-        <div
-          className="w-[38px] h-[38px] rounded-full flex items-center justify-center font-bold cursor-pointer"
+          className="w-[38px] h-[38px] rounded-full flex items-center justify-center font-bold cursor-pointer select-none"
           style={{
             background: "var(--blue-600)",
             color: "#fff",
@@ -49,34 +51,41 @@ export default function Topbar() {
           }}
           onClick={() => setMenuOpen((v) => !v)}
         >
-          管
+          {initial}
         </div>
 
         {menuOpen && (
-          <div
-            className="absolute top-[50px] right-0 bg-white rounded-[12px] w-[230px] p-2 z-50"
-            style={{
-              border: "1px solid var(--gray-200)",
-              boxShadow: "0 10px 30px rgba(2,32,71,.15)",
-            }}
-          >
+          <>
             <div
-              className="px-3 py-[10px] mb-[6px]"
-              style={{ borderBottom: "1px solid var(--gray-100)" }}
-            >
-              <b className="block text-[14px]">管理者</b>
-              <span className="text-[12px]" style={{ color: "var(--gray-500)" }}>
-                admin@example.com
-              </span>
-            </div>
-            <button
-              className="flex items-center gap-[10px] w-full px-3 py-[9px] rounded-lg text-[13px] text-left hover:bg-gray-100"
-              style={{ color: "var(--red)" }}
+              className="fixed inset-0 z-40"
               onClick={() => setMenuOpen(false)}
+            />
+            <div
+              className="absolute top-[50px] right-0 bg-white rounded-[12px] w-[230px] p-2 z-50"
+              style={{
+                border: "1px solid var(--gray-200)",
+                boxShadow: "0 10px 30px rgba(2,32,71,.15)",
+              }}
             >
-              ⎋ ログアウト
-            </button>
-          </div>
+              <div
+                className="px-3 py-[10px] mb-[6px]"
+                style={{ borderBottom: "1px solid var(--gray-100)" }}
+              >
+                <span className="block text-[12px]" style={{ color: "var(--gray-500)" }}>
+                  {userEmail}
+                </span>
+              </div>
+              <button
+                className="flex items-center gap-[10px] w-full px-3 py-[9px] rounded-lg text-[13px] text-left"
+                style={{ color: "var(--red)" }}
+                onClick={handleSignOut}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--gray-100)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                ⎋ ログアウト
+              </button>
+            </div>
+          </>
         )}
       </div>
     </header>
