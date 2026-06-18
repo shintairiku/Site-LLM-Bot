@@ -30,6 +30,7 @@ from site_llm_bot.services.analytics_store import (
     mask_pii,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
+from site_llm_bot.services.prompt_store import SupabasePromptStore
 from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
 from site_llm_bot.services.unique_user_store import (
     InMemoryUniqueUserStore,
@@ -120,6 +121,7 @@ def create_app(
     chat_message_sent_store: ChatMessageSentStore | None = None,
     related_link_click_store: RelatedLinkClickStore | None = None,
     unique_user_store: UniqueUserStore | None = None,
+    prompt_store: SupabasePromptStore | None = None,
 ) -> FastAPI:
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
@@ -131,6 +133,7 @@ def create_app(
         related_link_click_store or create_related_link_click_store(app_settings)
     )
     unique_user_store = unique_user_store or create_unique_user_store(app_settings)
+    prompt_store = prompt_store or create_prompt_store(app_settings)
     if analytics_store is None and app_settings.analytics_enabled:
         analytics_store = LoggingAnalyticsStore()
 
@@ -241,6 +244,7 @@ def create_app(
             analytics_store=analytics_store,
             chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
+            prompt_store=prompt_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
@@ -276,6 +280,7 @@ def create_app(
             analytics_store=analytics_store,
             chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
+            prompt_store=prompt_store,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.page_url,
@@ -333,6 +338,7 @@ async def generate_chat_response(
     analytics_store: AnalyticsStore | None,
     chat_message_sent_store: ChatMessageSentStore | None,
     unique_user_store: UniqueUserStore,
+    prompt_store: SupabasePromptStore | None,
     session_id: str | None,
     message: str,
     page_url: str | None,
@@ -398,10 +404,16 @@ async def generate_chat_response(
         limit=settings.max_history_messages,
     )
     session_store.append_message(session.session_id, "user", normalized_message)
+
+    system_prompt: str | None = None
+    if prompt_store is not None:
+        system_prompt = await prompt_store.fetch(tenant.tenant_id)
+
     chat_handler = OpenAIChatHandler(
         api_key=settings.openai_api_key,
         model=settings.openai_model,
         search_allowed_domains=tenant.allowed_domains,
+        system_prompt=system_prompt,
         timeout_seconds=settings.openai_timeout_seconds,
         client=openai_client,
     )
@@ -442,6 +454,17 @@ def create_related_link_click_store(settings: Settings) -> RelatedLinkClickStore
     """Supabase設定があれば関連リンククリックイベントをDBへ記録する。"""
     if settings.supabase_url and settings.supabase_service_role_key:
         return SupabaseRelatedLinkClickStore(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return None
+
+
+def create_prompt_store(settings: Settings) -> SupabasePromptStore | None:
+    """Supabase設定があればプロンプトをDBから取得する。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabasePromptStore(
             supabase_url=settings.supabase_url,
             service_role_key=settings.supabase_service_role_key,
             timeout_seconds=settings.supabase_timeout_seconds,

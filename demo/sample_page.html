@@ -192,6 +192,11 @@
         }
 
         select.addEventListener("change", syncTenant);
+
+        // ページ読み込み時はウィジェットがまだ defer 未実行のため、
+        // domain 表示だけを初期化して tenant-change イベントは dispatch しない。
+        const initialOption = select.selectedOptions[0];
+        domain.textContent = initialOption.dataset.domain;
       })();
     </script>
   </body>
