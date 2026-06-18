@@ -1,5 +1,4 @@
-import { Suspense } from "react";
-import LoginForm from "./LoginForm";
+import LoginFormPassword from "./LoginFormPassword";
 
 export default function LoginPage() {
   return (
@@ -31,13 +30,11 @@ export default function LoginPage() {
         <h1 className="text-[20px] font-bold mb-1" style={{ color: "var(--gray-900)" }}>
           ログイン
         </h1>
-        <p className="text-[13px] mb-8" style={{ color: "var(--gray-500)" }}>
-          テナントに登録されたGoogleアカウントでログインしてください
+        <p className="text-[13px] mb-6" style={{ color: "var(--gray-500)" }}>
+          管理者から発行されたメールアドレスとパスワードでログインしてください
         </p>
 
-        <Suspense>
-          <LoginForm />
-        </Suspense>
+        <LoginFormPassword />
       </div>
     </div>
   );
