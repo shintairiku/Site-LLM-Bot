@@ -46,6 +46,13 @@
     <div class="site-llm-bot-messages"></div>
     <div class="site-llm-bot-suggestions"></div>
     <div class="site-llm-bot-status">待機中</div>
+    <div class="site-llm-bot-feedback">
+      <p class="site-llm-bot-feedback-label">問題は解決しましたか？</p>
+      <div class="site-llm-bot-feedback-buttons">
+        <button type="button" data-resolved="true">✓ 解決した</button>
+        <button type="button" data-resolved="false">✗ 未解決</button>
+      </div>
+    </div>
     <form class="site-llm-bot-form">
       <textarea placeholder="住まいに関するご質問を入力してください"></textarea>
       <button type="submit">送信</button>
@@ -59,10 +66,13 @@
   const suggestionsEl = panel.querySelector(".site-llm-bot-suggestions");
   const statusEl = panel.querySelector(".site-llm-bot-status");
   const closeButton = panel.querySelector(".site-llm-bot-close");
+  const feedbackEl = panel.querySelector(".site-llm-bot-feedback");
+  const feedbackButtonsEl = feedbackEl.querySelector(".site-llm-bot-feedback-buttons");
   const form = panel.querySelector(".site-llm-bot-form");
   const textarea = form.querySelector("textarea");
   const submitButton = form.querySelector("button");
   const titleEl = panel.querySelector(".site-llm-bot-title");
+  let feedbackSubmitted = false;
 
   // 初期メッセージは addMessage に集約しておき、
   // 送信時のユーザー発話追加・モック応答追加も同じ導線で処理する。
@@ -83,6 +93,18 @@
       textarea.focus();
     });
     suggestionsEl.appendChild(button);
+  });
+
+  feedbackButtonsEl.querySelectorAll("button").forEach(function (button) {
+    button.addEventListener("click", function () {
+      if (feedbackSubmitted) {
+        return;
+      }
+      feedbackSubmitted = true;
+      const resolved = button.dataset.resolved === "true";
+      feedbackButtonsEl.innerHTML = '<span class="site-llm-bot-feedback-thanks">フィードバックありがとうございます</span>';
+      recordSessionFeedback(resolved);
+    });
   });
 
   // 開閉処理はこのクリックイベントだけに閉じ込め、見た目状態は CSS の is-open で管理する。
@@ -141,9 +163,11 @@
         "回答を表示しました",
         false
       );
+      feedbackEl.classList.add("is-visible");
     } catch (error) {
       addMessage(messagesEl, "bot", createMockReply(text));
       setStatus(statusEl, "ただいま詳しい回答を取得できないため、参考情報を表示しています", false);
+      feedbackEl.classList.add("is-visible");
     } finally {
       setBusyState(textarea, submitButton, suggestionsEl, false);
       textarea.focus();
@@ -197,6 +221,35 @@
     }
 
     return response.json();
+  }
+
+  function recordSessionFeedback(resolved) {
+    requestSessionFeedback(resolved).catch(function () {
+      // フィードバック計測の失敗でユーザー操作を妨げない。
+    });
+  }
+
+  async function requestSessionFeedback(resolved) {
+    const response = await window.fetch(`${apiBase}/v1/analytics/session-feedback`, {
+      method: "POST",
+      keepalive: true,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tenant-Id": tenantId,
+        "X-Widget-Token": publicToken,
+      },
+      body: JSON.stringify({
+        resolved: resolved,
+        metadata: {
+          page_url: window.location.href,
+          visitor_id: visitorId,
+          session_id: sessionId,
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`session feedback request failed: ${response.status}`);
+    }
   }
 
   function recordRelatedLinkClick(linkUrl) {

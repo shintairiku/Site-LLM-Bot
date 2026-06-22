@@ -73,6 +73,19 @@ class RelatedLinkClickEvent:
     session_id: str | None = None
 
 
+@dataclass(slots=True)
+class SessionFeedbackEvent:
+    """セッションフィードバックイベント。"""
+
+    tenant_id: str
+    session_id: str
+    resolved: bool
+    origin: str | None
+    page_url: str | None
+    occurred_at: datetime
+    visitor_id: str | None = None
+
+
 class AnalyticsStore:
     """記録処理のインターフェース。"""
 
@@ -177,6 +190,66 @@ class SupabaseChatMessageSentStore:
             "p_page_url": event.page_url,
             "p_occurred_at": event.occurred_at.isoformat(),
             "p_question_text": event.question_text,
+        }
+        headers = {
+            "apikey": self._service_role_key,
+            "Content-Type": "application/json",
+        }
+        if not self._service_role_key.startswith("sb_secret_"):
+            headers["Authorization"] = f"Bearer {self._service_role_key}"
+
+        if self._client is not None:
+            response = await self._client.post(
+                self._rpc_url,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            return
+
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            response = await client.post(
+                self._rpc_url,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+
+
+class SessionFeedbackStore(Protocol):
+    """セッションフィードバックイベントを永続化するストア。"""
+
+    async def record(self, event: SessionFeedbackEvent) -> None:
+        """セッションフィードバックイベントを永続化する。"""
+
+
+class SupabaseSessionFeedbackStore:
+    """Supabase RPC でセッションフィードバックイベントを記録するストア。"""
+
+    def __init__(
+        self,
+        *,
+        supabase_url: str,
+        service_role_key: str,
+        timeout_seconds: float = 10.0,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._rpc_url = (
+            f"{supabase_url.rstrip('/')}/rest/v1/rpc/record_session_feedback"
+        )
+        self._service_role_key = service_role_key
+        self._timeout_seconds = timeout_seconds
+        self._client = client
+
+    async def record(self, event: SessionFeedbackEvent) -> None:
+        """Supabaseにセッションフィードバックイベントを記録する。"""
+        payload = {
+            "p_tenant_id": event.tenant_id,
+            "p_session_id": event.session_id,
+            "p_visitor_id": event.visitor_id,
+            "p_resolved": event.resolved,
+            "p_page_url": event.page_url,
+            "p_occurred_at": event.occurred_at.isoformat(),
         }
         headers = {
             "apikey": self._service_role_key,

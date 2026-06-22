@@ -121,7 +121,7 @@
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 0 16px 12px;
+  padding: 0 16px 8px;
   background: var(--widget-surface);
 }
 
@@ -129,18 +129,18 @@
   flex: 0 0 auto;
   border: 1px solid var(--widget-border);
   border-radius: 999px;
-  padding: 8px 12px;
+  padding: 6px 11px;
   color: var(--widget-text);
   background: #fff;
-  font: 500 12px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
+  font: 500 11px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
   cursor: pointer;
 }
 
 .site-llm-bot-status {
-  padding: 0 16px 12px;
+  padding: 0 16px 8px;
   color: var(--widget-muted);
   background: var(--widget-surface);
-  font: 400 12px/1.4 "Hiragino Sans", "Yu Gothic", sans-serif;
+  font: 400 11px/1.4 "Hiragino Sans", "Yu Gothic", sans-serif;
 }
 
 .site-llm-bot-status.is-busy {
@@ -151,30 +151,30 @@
 .site-llm-bot-form {
   display: flex;
   gap: 8px;
-  padding: 14px;
+  padding: 10px 14px;
   border-top: 1px solid var(--widget-border);
   background: #fff;
 }
 
 .site-llm-bot-form textarea {
   flex: 1;
-  min-height: 44px;
+  min-height: 40px;
   max-height: 110px;
   resize: vertical;
   border: 1px solid var(--widget-border);
   border-radius: 14px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   color: var(--widget-text);
   font: 400 14px/1.5 "Hiragino Sans", "Yu Gothic", sans-serif;
 }
 
 .site-llm-bot-form button {
-  min-width: 78px;
+  min-width: 72px;
   border: 0;
   border-radius: 14px;
   color: #fff;
   background: var(--widget-primary);
-  font: 700 14px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
+  font: 700 13px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
   cursor: pointer;
 }
 
@@ -183,6 +183,51 @@
 .site-llm-bot-suggestions button:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.site-llm-bot-feedback {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--widget-border);
+  background: var(--widget-surface);
+}
+
+.site-llm-bot-feedback.is-visible {
+  display: flex;
+}
+
+.site-llm-bot-feedback-label {
+  margin: 0;
+  flex-shrink: 0;
+  color: var(--widget-muted);
+  font: 400 11px/1.4 "Hiragino Sans", "Yu Gothic", sans-serif;
+}
+
+.site-llm-bot-feedback-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.site-llm-bot-feedback-buttons button {
+  border: 1px solid var(--widget-border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  color: var(--widget-text);
+  background: #fff;
+  font: 500 11px/1 "Hiragino Sans", "Yu Gothic", sans-serif;
+  cursor: pointer;
+}
+
+.site-llm-bot-feedback-buttons button:hover {
+  background: var(--widget-border);
+}
+
+.site-llm-bot-feedback-thanks {
+  color: var(--widget-muted);
+  font: 400 11px/1.4 "Hiragino Sans", "Yu Gothic", sans-serif;
 }
 
 @media (max-width: 640px) {

@@ -1,5 +1,7 @@
 -- テナントごとのプロンプトを履歴付きで管理するテーブル
 -- 現在のプロンプト = tenant_idごとの最新レコード（created_at降順の先頭）
+set local role postgres;
+
 create table if not exists public.prompts (
   id          uuid default gen_random_uuid() primary key,
   tenant_id   text not null,

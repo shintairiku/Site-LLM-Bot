@@ -24,8 +24,11 @@ from site_llm_bot.services.analytics_store import (
     LoggingAnalyticsStore,
     RelatedLinkClickEvent,
     RelatedLinkClickStore,
+    SessionFeedbackEvent,
+    SessionFeedbackStore,
     SupabaseChatMessageSentStore,
     SupabaseRelatedLinkClickStore,
+    SupabaseSessionFeedbackStore,
     UserFirstSeenEvent,
     mask_pii,
 )
@@ -114,12 +117,28 @@ class RelatedLinkClickRequest(BaseModel):
     )
 
 
+class SessionFeedbackMetadata(BaseModel):
+    """セッションフィードバックに付随するメタデータ。"""
+
+    page_url: str | None = None
+    visitor_id: str | None = None
+    session_id: str | None = None
+
+
+class SessionFeedbackRequest(BaseModel):
+    """セッションフィードバック記録APIの入力。"""
+
+    resolved: bool
+    metadata: SessionFeedbackMetadata = Field(default_factory=SessionFeedbackMetadata)
+
+
 def create_app(
     settings: Settings | None = None,
     openai_client: httpx.AsyncClient | None = None,
     analytics_store: AnalyticsStore | None = None,
     chat_message_sent_store: ChatMessageSentStore | None = None,
     related_link_click_store: RelatedLinkClickStore | None = None,
+    session_feedback_store: SessionFeedbackStore | None = None,
     unique_user_store: UniqueUserStore | None = None,
     prompt_store: SupabasePromptStore | None = None,
 ) -> FastAPI:
@@ -131,6 +150,9 @@ def create_app(
     )
     related_link_click_store = (
         related_link_click_store or create_related_link_click_store(app_settings)
+    )
+    session_feedback_store = (
+        session_feedback_store or create_session_feedback_store(app_settings)
     )
     unique_user_store = unique_user_store or create_unique_user_store(app_settings)
     prompt_store = prompt_store or create_prompt_store(app_settings)
@@ -326,6 +348,41 @@ def create_app(
         )
         return Response(status_code=204)
 
+    @app.post("/v1/analytics/session-feedback", status_code=204)
+    async def session_feedback(
+        feedback_request: SessionFeedbackRequest,
+        http_request: Request,
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+        x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
+    ) -> Response:
+        """セッションフィードバック（解決/未解決）を記録する。"""
+        origin = http_request.headers.get("origin")
+        tenant = authenticate_widget_request(
+            settings=app_settings,
+            request_tenant_id=None,
+            header_tenant_id=x_tenant_id,
+            widget_token=x_widget_token,
+            origin=origin,
+        )
+        http_request.state.tenant_id = tenant.tenant_id
+        session_id = normalize_session_id(feedback_request.metadata.session_id)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+
+        await record_session_feedback(
+            session_feedback_store=session_feedback_store,
+            event=SessionFeedbackEvent(
+                tenant_id=tenant.tenant_id,
+                session_id=session_id,
+                resolved=feedback_request.resolved,
+                visitor_id=normalize_visitor_id(feedback_request.metadata.visitor_id),
+                origin=origin,
+                page_url=feedback_request.metadata.page_url,
+                occurred_at=datetime.now(UTC),
+            ),
+        )
+        return Response(status_code=204)
+
     return app
 
 
@@ -450,6 +507,17 @@ def create_chat_message_sent_store(settings: Settings) -> ChatMessageSentStore |
     return None
 
 
+def create_session_feedback_store(settings: Settings) -> SessionFeedbackStore | None:
+    """Supabase設定があればセッションフィードバックイベントをDBへ記録する。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabaseSessionFeedbackStore(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return None
+
+
 def create_related_link_click_store(settings: Settings) -> RelatedLinkClickStore | None:
     """Supabase設定があれば関連リンククリックイベントをDBへ記録する。"""
     if settings.supabase_url and settings.supabase_service_role_key:
@@ -496,6 +564,22 @@ async def record_chat_message_sent(
     except Exception:
         logging.getLogger("site_llm_bot.analytics").exception(
             "failed to record chat message sent"
+        )
+
+
+async def record_session_feedback(
+    *,
+    session_feedback_store: SessionFeedbackStore | None,
+    event: SessionFeedbackEvent,
+) -> None:
+    """セッションフィードバックイベントをDBへ記録する。失敗してもフィードバック導線は止めない。"""
+    if session_feedback_store is None:
+        return
+    try:
+        await session_feedback_store.record(event)
+    except Exception:
+        logging.getLogger("site_llm_bot.analytics").exception(
+            "failed to record session feedback"
         )
 
 
