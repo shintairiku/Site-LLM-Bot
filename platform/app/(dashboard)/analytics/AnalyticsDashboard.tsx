@@ -1,43 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import type { AnalyticsData, Period } from "@/lib/analytics";
 
-type Period = "day" | "week" | "month";
-
-interface AnalyticsData {
-  kpis: {
-    chatCount: number;
-    userCount: number;
-    linkClickCount: number;
-    resolvedRate: number;
-  };
-  trend: Array<{ label: string; chatCount: number; userCount: number }>;
-  linkClicks: Array<{ link_url: string; page_title: string; click_count: number }>;
+interface Props {
+  day: AnalyticsData;
+  week: AnalyticsData;
+  month: AnalyticsData;
 }
 
-export default function AnalyticsDashboard() {
+export default function AnalyticsDashboard({ day, week, month }: Props) {
   const [period, setPeriod] = useState<Period>("week");
-  const [data, setData] = useState<AnalyticsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetch(`/api/analytics?period=${period}`)
-      .then(async (r) => {
-        const json = await r.json();
-        if (!r.ok) throw new Error(json.error ?? "取得エラー");
-        return json as AnalyticsData;
-      })
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [period]);
+  const data = period === "day" ? day : period === "week" ? week : month;
 
   return (
     <div>
@@ -72,180 +51,148 @@ export default function AnalyticsDashboard() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="text-[13px] px-4 py-3 rounded-[9px] mb-4"
-          style={{ background: "#fee2e2", color: "var(--red)" }}
-        >
-          読み込みに失敗しました: {error}
-        </div>
-      )}
+      {/* KPIカード */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: "16px",
+          marginBottom: "18px",
+        }}
+      >
+        <KpiCard label="チャット送信回数" value={data.kpis.chatCount.toLocaleString()} />
+        <KpiCard label="利用ユーザー数" value={data.kpis.userCount.toLocaleString()} />
+        <KpiCard label="URL遷移数" value={data.kpis.linkClickCount.toLocaleString()} />
+        <KpiCard
+          label="解決率"
+          value={data.kpis.resolvedRate !== null ? `${data.kpis.resolvedRate}%` : "-"}
+        />
+      </div>
 
-      {loading ? (
-        <div className="text-[13px]" style={{ color: "var(--gray-500)" }}>
-          読み込み中...
-        </div>
-      ) : data && (
-        <>
-          {/* KPIカード */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: "16px",
-              marginBottom: "18px",
-            }}
-          >
-            <KpiCard label="チャット送信回数" value={data.kpis.chatCount.toLocaleString()} />
-            <KpiCard label="利用ユーザー数" value={data.kpis.userCount.toLocaleString()} />
-            <KpiCard label="URL遷移数" value={data.kpis.linkClickCount.toLocaleString()} />
-            <KpiCard
-              label="解決率"
-              value={`${data.kpis.resolvedRate}%`}
-              mock
+      {/* トレンドチャート */}
+      <div
+        className="bg-white rounded-[14px] p-5 mb-[18px]"
+        style={{ border: "1px solid var(--gray-200)" }}
+      >
+        <div className="text-[15px] font-bold mb-4">送信回数・ユーザー数の推移</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={data.trend} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-200)" />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--gray-500)" }} />
+            <YAxis tick={{ fontSize: 11, fill: "var(--gray-500)" }} allowDecimals={false} />
+            <Tooltip />
+            <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+            <Line
+              type="monotone"
+              dataKey="chatCount"
+              name="送信回数"
+              stroke="#2563eb"
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4 }}
             />
-          </div>
+            <Line
+              type="monotone"
+              dataKey="userCount"
+              name="ユーザー数"
+              stroke="#3b82f6"
+              strokeWidth={2}
+              strokeDasharray="5 4"
+              dot={false}
+              activeDot={{ r: 4 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
 
-          {/* トレンドチャート */}
-          <div
-            className="bg-white rounded-[14px] p-5 mb-[18px]"
-            style={{ border: "1px solid var(--gray-200)" }}
-          >
-            <div className="text-[15px] font-bold mb-4">
-              送信回数・ユーザー数の推移
-            </div>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={data.trend} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-200)" />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--gray-500)" }} />
-                <YAxis tick={{ fontSize: 11, fill: "var(--gray-500)" }} allowDecimals={false} />
-                <Tooltip />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-                <Line
-                  type="monotone"
-                  dataKey="chatCount"
-                  name="送信回数"
-                  stroke="#2563eb"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="userCount"
-                  name="ユーザー数"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  strokeDasharray="5 4"
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* URL遷移テーブル */}
-          <div
-            className="bg-white rounded-[14px] p-5"
-            style={{ border: "1px solid var(--gray-200)" }}
-          >
-            <div className="text-[15px] font-bold mb-4">関連リンク遷移</div>
-            {data.linkClicks.length === 0 ? (
-              <p className="text-[13px]" style={{ color: "var(--gray-500)" }}>
-                この期間にURL遷移はありません
-              </p>
-            ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-                <thead>
-                  <tr>
-                    {["URL", "ページタイトル", "表示回数"].map((h) => (
-                      <th
-                        key={h}
-                        style={{
-                          textAlign: "left",
-                          fontSize: "11px",
-                          color: "var(--gray-500)",
-                          textTransform: "uppercase",
-                          letterSpacing: ".04em",
-                          padding: "10px 12px",
-                          borderBottom: "1px solid var(--gray-200)",
-                        }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.linkClicks.map((row, i) => (
-                    <tr
-                      key={i}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--gray-50)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+      {/* URL遷移テーブル */}
+      <div
+        className="bg-white rounded-[14px] p-5"
+        style={{ border: "1px solid var(--gray-200)" }}
+      >
+        <div className="text-[15px] font-bold mb-4">関連リンク遷移</div>
+        {data.linkClicks.length === 0 ? (
+          <p className="text-[13px]" style={{ color: "var(--gray-500)" }}>
+            この期間にURL遷移はありません
+          </p>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+            <thead>
+              <tr>
+                {["URL", "ページタイトル", "表示回数"].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "left",
+                      fontSize: "11px",
+                      color: "var(--gray-500)",
+                      textTransform: "uppercase",
+                      letterSpacing: ".04em",
+                      padding: "10px 12px",
+                      borderBottom: "1px solid var(--gray-200)",
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.linkClicks.map((row, i) => (
+                <tr
+                  key={i}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--gray-50)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                >
+                  <td
+                    style={{
+                      padding: "12px",
+                      borderBottom: "1px solid var(--gray-100)",
+                      maxWidth: "340px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <a
+                      href={row.link_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "var(--blue-600)" }}
                     >
-                      <td
-                        style={{
-                          padding: "12px",
-                          borderBottom: "1px solid var(--gray-100)",
-                          maxWidth: "340px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <a
-                          href={row.link_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: "var(--blue-600)" }}
-                        >
-                          {row.link_url}
-                        </a>
-                      </td>
-                      <td style={{ padding: "12px", borderBottom: "1px solid var(--gray-100)" }}>
-                        {row.page_title}
-                      </td>
-                      <td style={{ padding: "12px", borderBottom: "1px solid var(--gray-100)", fontWeight: 600 }}>
-                        {row.click_count.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
-      )}
+                      {row.link_url}
+                    </a>
+                  </td>
+                  <td style={{ padding: "12px", borderBottom: "1px solid var(--gray-100)" }}>
+                    {row.page_title}
+                  </td>
+                  <td
+                    style={{
+                      padding: "12px",
+                      borderBottom: "1px solid var(--gray-100)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {row.click_count.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  mock = false,
-}: {
-  label: string;
-  value: string;
-  mock?: boolean;
-}) {
+function KpiCard({ label, value }: { label: string; value: string }) {
   return (
     <div
       className="bg-white rounded-[14px] p-[18px]"
       style={{ border: "1px solid var(--gray-200)" }}
     >
-      <div className="flex items-center gap-2">
-        <div className="text-[12px]" style={{ color: "var(--gray-500)" }}>
-          {label}
-        </div>
-        {mock && (
-          <span
-            className="text-[10px] font-bold px-2 py-[2px] rounded-full"
-            style={{ background: "var(--gray-100)", color: "var(--gray-500)" }}
-          >
-            モック
-          </span>
-        )}
+      <div className="text-[12px]" style={{ color: "var(--gray-500)" }}>
+        {label}
       </div>
       <div className="text-[26px] font-extrabold mt-[6px] mb-[2px]">{value}</div>
     </div>
