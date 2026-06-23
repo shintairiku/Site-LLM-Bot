@@ -81,7 +81,7 @@ export default function AnalyticsDashboard({ day, week, month }: Props) {
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--gray-500)" }} />
             <YAxis tick={{ fontSize: 11, fill: "var(--gray-500)" }} allowDecimals={false} />
             <Tooltip />
-            <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
             <Line
               type="monotone"
               dataKey="chatCount"
@@ -90,6 +90,7 @@ export default function AnalyticsDashboard({ day, week, month }: Props) {
               strokeWidth={2}
               dot={false}
               activeDot={{ r: 4 }}
+              legendType="line"
             />
             <Line
               type="monotone"
@@ -100,6 +101,7 @@ export default function AnalyticsDashboard({ day, week, month }: Props) {
               strokeDasharray="5 4"
               dot={false}
               activeDot={{ r: 4 }}
+              legendType="line"
             />
           </LineChart>
         </ResponsiveContainer>
