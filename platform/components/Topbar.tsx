@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useDashboard } from "@/lib/dashboard-context";
 
 const pageMeta: Record<string, { title: string; crumb: string }> = {
   "/prompt": { title: "プロンプト", crumb: "チャットボットの標準プロンプトを管理" },
@@ -19,6 +20,7 @@ export default function Topbar({ userEmail }: TopbarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { refresh, refreshing } = useDashboard();
 
   const meta = pageMeta[pathname] ?? { title: "BotConsole", crumb: "" };
   const initial = userEmail ? userEmail[0].toUpperCase() : "?";
@@ -41,7 +43,24 @@ export default function Topbar({ userEmail }: TopbarProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 relative">
+      <div className="flex items-center gap-3 relative">
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          className="flex items-center gap-[6px] px-3 py-[7px] rounded-[8px] text-[12px] font-semibold"
+          style={{
+            border: "1px solid var(--gray-200)",
+            background: refreshing ? "var(--gray-100)" : "#fff",
+            color: refreshing ? "var(--gray-400)" : "var(--gray-600)",
+            cursor: refreshing ? "not-allowed" : "pointer",
+          }}
+        >
+          <span style={{ display: "inline-block", animation: refreshing ? "spin 1s linear infinite" : "none" }}>
+            ↻
+          </span>
+          {refreshing ? "更新中..." : "最新情報に更新"}
+        </button>
+
         <div
           className="w-[38px] h-[38px] rounded-full flex items-center justify-center font-bold cursor-pointer select-none"
           style={{

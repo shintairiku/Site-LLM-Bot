@@ -62,6 +62,11 @@
   document.body.appendChild(launcher);
   document.body.appendChild(panel);
 
+  const resizeHandle = document.createElement("div");
+  resizeHandle.className = "site-llm-bot-resize-handle";
+  resizeHandle.setAttribute("aria-hidden", "true");
+  panel.appendChild(resizeHandle);
+
   const messagesEl = panel.querySelector(".site-llm-bot-messages");
   const suggestionsEl = panel.querySelector(".site-llm-bot-suggestions");
   const statusEl = panel.querySelector(".site-llm-bot-status");
@@ -461,6 +466,56 @@
     const randomValue = Math.random().toString(36).slice(2, 12);
     return `${Date.now().toString(36)}-${randomValue}`;
   }
+
+  // ── リサイズハンドル ──────────────────────────────────────────────
+  // パネルは right: 20px 固定なので、左端をドラッグして幅を変える。
+  let isResizing = false;
+
+  function startResize() {
+    if (window.innerWidth <= 640) return; // モバイル全画面では無効
+    isResizing = true;
+    panel.classList.add("is-resizing");
+    document.body.style.userSelect = "none";
+  }
+
+  function doResize(clientX) {
+    if (!isResizing) return;
+    const panelRight = window.innerWidth - 20;
+    const clamped = Math.min(Math.max(280, panelRight - clientX), window.innerWidth - 40);
+    panel.style.width = clamped + "px";
+  }
+
+  function endResize() {
+    if (!isResizing) return;
+    isResizing = false;
+    panel.classList.remove("is-resizing");
+    document.body.style.userSelect = "";
+  }
+
+  resizeHandle.addEventListener("mousedown", function (e) {
+    e.preventDefault();
+    startResize();
+  });
+
+  window.addEventListener("mousemove", function (e) {
+    doResize(e.clientX);
+  });
+
+  window.addEventListener("mouseup", endResize);
+
+  resizeHandle.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    startResize();
+  }, { passive: false });
+
+  window.addEventListener("touchmove", function (e) {
+    if (isResizing) {
+      e.preventDefault();
+      doResize(e.touches[0].clientX);
+    }
+  }, { passive: false });
+
+  window.addEventListener("touchend", endResize);
 
   // パネルのタイトルに tenantName を埋め込むための最低限のエスケープ関数。
   // innerHTML に外部値を入れる箇所はここを通す前提にして、XSS の混入点を限定する。

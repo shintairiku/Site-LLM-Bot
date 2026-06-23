@@ -44,6 +44,36 @@
   display: flex;
 }
 
+.site-llm-bot-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 1;
+  border-radius: 24px 0 0 24px;
+}
+
+.site-llm-bot-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--widget-border);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.site-llm-bot-resize-handle:hover::after,
+.site-llm-bot-panel.is-resizing .site-llm-bot-resize-handle::after {
+  opacity: 1;
+}
+
 .site-llm-bot-header {
   position: relative;
   padding: 18px;
@@ -242,5 +272,9 @@
   .site-llm-bot-launcher {
     right: 16px;
     bottom: 16px;
+  }
+
+  .site-llm-bot-resize-handle {
+    display: none;
   }
 }
