@@ -1,14 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-
-interface PromptRecord {
-  id: string;
-  content: string;
-  note: string | null;
-  created_by: string | null;
-  created_at: string;
-}
+import { useState } from "react";
+import { useDashboard, type PromptRecord } from "@/lib/dashboard-context";
 
 function formatDate(iso: string) {
   const d = new Date(iso);
@@ -16,28 +9,11 @@ function formatDate(iso: string) {
 }
 
 export default function PromptEditor() {
-  const [records, setRecords] = useState<PromptRecord[]>([]);
-  const [content, setContent] = useState("");
+  const { prompts, setPrompts } = useDashboard();
+  const [content, setContent] = useState(() => prompts[0]?.content ?? "");
   const [note, setNote] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-
-  useEffect(() => {
-    fetch("/api/prompt")
-      .then(async (r) => {
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error ?? "取得エラー");
-        if (!Array.isArray(data)) throw new Error("不正なレスポンス形式");
-        return data as PromptRecord[];
-      })
-      .then((data) => {
-        setRecords(data);
-        if (data.length > 0) setContent(data[0].content);
-      })
-      .catch((e) => setMessage({ type: "err", text: `読み込みに失敗しました: ${e.message}` }))
-      .finally(() => setLoading(false));
-  }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -49,7 +25,7 @@ export default function PromptEditor() {
     });
     if (res.ok) {
       const saved: PromptRecord = await res.json();
-      setRecords((prev) => [saved, ...prev]);
+      setPrompts([saved, ...prompts]);
       setNote("");
       setMessage({ type: "ok", text: "保存しました" });
     } else {
@@ -62,14 +38,6 @@ export default function PromptEditor() {
     setContent(record.content);
     setNote(`${formatDate(record.created_at)} の版を復元`);
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  if (loading) {
-    return (
-      <div className="text-[13px]" style={{ color: "var(--gray-500)" }}>
-        読み込み中...
-      </div>
-    );
   }
 
   return (
@@ -175,20 +143,20 @@ export default function PromptEditor() {
           style={{ border: "1px solid var(--gray-200)" }}
         >
           <div className="text-[15px] font-bold mb-[14px]">変更履歴</div>
-          {records.length === 0 ? (
+          {prompts.length === 0 ? (
             <p className="text-[13px]" style={{ color: "var(--gray-500)" }}>
               まだ保存履歴がありません
             </p>
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {records.map((r, i) => (
+              {prompts.map((r, i) => (
                 <li
                   key={r.id}
                   style={{
                     position: "relative",
                     paddingLeft: "22px",
-                    paddingBottom: i < records.length - 1 ? "18px" : "0",
-                    borderLeft: i < records.length - 1 ? "2px solid var(--gray-200)" : "2px solid transparent",
+                    paddingBottom: i < prompts.length - 1 ? "18px" : "0",
+                    borderLeft: i < prompts.length - 1 ? "2px solid var(--gray-200)" : "2px solid transparent",
                   }}
                 >
                   <span

@@ -5,18 +5,14 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import type { AnalyticsData, Period } from "@/lib/analytics";
+import { useDashboard } from "@/lib/dashboard-context";
+import type { Period } from "@/lib/analytics";
 
-interface Props {
-  day: AnalyticsData;
-  week: AnalyticsData;
-  month: AnalyticsData;
-}
-
-export default function AnalyticsDashboard({ day, week, month }: Props) {
+export default function AnalyticsDashboard() {
+  const { analytics } = useDashboard();
   const [period, setPeriod] = useState<Period>("week");
 
-  const data = period === "day" ? day : period === "week" ? week : month;
+  const data = period === "day" ? analytics.day : period === "week" ? analytics.week : analytics.month;
 
   return (
     <div>
