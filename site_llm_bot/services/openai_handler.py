@@ -14,6 +14,19 @@ SAFETY_MESSAGE = (
     "ご質問に関して、現在は対象サイト内で確認できた情報のみを案内する設定です。"
     " 許可ドメインから取得できる情報では確認できなかったため、正確な案内のためにお問い合わせください。"
 )
+DEFAULT_SYSTEM_PROMPT = (
+    "あなたは住宅・リフォーム業向けサイト用のAIチャットボットです。"
+    " 丁寧な日本語で簡潔に回答してください。"
+    " 不明なことは推測せず、確認が必要だと伝えてください。"
+)
+
+# 回答品質に直接影響する制約。テナントが編集するプロンプトとは独立して常に適用する。
+_SYSTEM_ENFORCED_SUFFIX = (
+    " Markdown記法の強調（**や__）は使わないでください。"
+    " 回答本文にURLや参照元ドメイン名、括弧付きの出典表記は含めないでください。"
+    " 関連リンクはシステム側で追加するため、回答本文には含めないでください。"
+    " 質問内容が簡単なものであってもweb searchによる徹底的な情報収集を行ってください。"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,12 +62,16 @@ class OpenAIChatHandler:
         api_key: str | None,
         model: str,
         search_allowed_domains: list[str] | None = None,
+        system_prompt: str | None = None,
+        knowledge_context: list[str] | None = None,
         timeout_seconds: float = 30.0,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._search_allowed_domains = search_allowed_domains or []
+        self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._knowledge_context = knowledge_context or []
         self._timeout_seconds = timeout_seconds
         self._client = client
 
@@ -95,20 +112,26 @@ class OpenAIChatHandler:
         history: list[ChatMessage],
     ) -> dict[str, Any]:
         """Responses API へ渡す payload を組み立てる。"""
+        developer_instruction = self._system_prompt + _SYSTEM_ENFORCED_SUFFIX
+        if self._search_allowed_domains:
+            developer_instruction += (
+                " 回答前にWeb検索ツールで対象サイトを確認し、"
+                f" 次のドメインのみを根拠にしてください: {', '.join(self._search_allowed_domains)}"
+            )
+        if self._knowledge_context:
+            knowledge_block = "\n\n---\n\n".join(self._knowledge_context)
+            developer_instruction += (
+                " 加えて、管理者が登録した社内ナレッジから質問に関連する抜粋を以下に提供します。"
+                " 質問に関係する内容が含まれていれば根拠として活用してください。"
+                " 関連しない場合は無視して構いません。\n\n"
+                f"【社内ナレッジ抜粋】\n{knowledge_block}"
+            )
+
         user_text = message if not page_url else f"閲覧ページ: {page_url}\n質問: {message}"
         input_messages: list[dict[str, Any]] = [
             {
                 "role": "developer",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "あなたは住宅・リフォーム業向けサイト用のAIチャットボットです。"
-                            " 丁寧な日本語で簡潔に回答してください。"
-                            " 不明なことは推測せず、確認が必要だと伝えてください。"
-                        ),
-                    }
-                ],
+                "content": [{"type": "input_text", "text": developer_instruction}],
             }
         ]
 
@@ -127,40 +150,20 @@ class OpenAIChatHandler:
             }
         )
 
-        developer_instruction = (
-            "あなたは住宅・リフォーム業向けサイト用のAIチャットボットです。"
-            " 丁寧な日本語で簡潔に回答してください。"
-            " 不明なことは推測せず、確認が必要だと伝えてください。"
-            " Markdown記法の強調（**や__）は使わないでください。"
-            " 回答本文にURLや参照元ドメイン名、括弧付きの出典表記は含めないでください。"
-            " 関連リンクはシステム側で追加するため、回答本文には含めないでください。"
-            " 質問内容が簡単なものであってもweb searchによる徹底的な情報収集を行ってください。"
-        )
-        if self._search_allowed_domains:
-            developer_instruction += (
-                " 回答前にWeb検索ツールで対象サイトを確認し、"
-                f" 次のドメインのみを根拠にしてください: {', '.join(self._search_allowed_domains)}"
-            )
-
-        payload: dict[str, Any] = {
+        return {
             "model": self._model,
             "input": input_messages,
             "tools": [
                 {
                     "type": "web_search",
-                    "filters": {
-                        "allowed_domains": self._search_allowed_domains,
-                    },
+                    "filters": {"allowed_domains": self._search_allowed_domains},
                     "search_context_size": "high",
-
                 }
             ],
             "tool_choice": "required",
             "include": ["web_search_call.action.sources"],
             "reasoning": {"effort": "medium"},
         }
-        input_messages[0]["content"][0]["text"] = developer_instruction
-        return payload
 
     def _build_history_content(self, role: str, content: str) -> dict[str, str]:
         """Responses API の role ごとの content 形式に合わせて履歴を整形する。"""
@@ -273,6 +276,10 @@ class OpenAIChatHandler:
 
     def _is_source_inspection_allowed(self, inspection: SourceInspection) -> bool:
         if not self._search_allowed_domains:
+            return True
+        # 管理者が登録した社内ナレッジ（pgvectorで類似ヒットしてコンテキスト注入済み）が
+        # ある場合は、信頼できる根拠が提供されているとみなして回答を許可する。
+        if self._knowledge_context:
             return True
         return (
             inspection.used_web_search

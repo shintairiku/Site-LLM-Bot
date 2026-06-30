@@ -7,6 +7,8 @@
   // 埋め込み script タグの data 属性を起点に、ウィジェット表示に必要な設定値を初期化する。
   // この値は下の render 相当の処理と、テーマ反映、モック応答表示で参照される。
   const baseUrl = new URL("./", script.src || window.location.href);
+  const productionApiBase = "https://site-llm-bot-742231208085.asia-northeast1.run.app";
+  const developmentApiBase = "https://site-llm-bot-dev-742231208085.asia-northeast1.run.app";
   const cssUrl = new URL("mock-widget.css", baseUrl).toString();
   const apiBase = resolveApiBase(
     script.dataset.apiBase
@@ -15,6 +17,7 @@
   let tenantName = script.dataset.tenantName || "サンプル工務店";
   let publicToken = script.dataset.publicToken || "";
   let accent = script.dataset.color || "#155e75";
+  const visitorId = resolveVisitorId();
   let sessionId = null;
   const suggestions = [
     "施工エリアを教えてください",
@@ -189,6 +192,7 @@
         message: text,
         page_url: window.location.href,
         session_id: sessionId,
+        visitor_id: visitorId,
       }),
     });
     if (!response.ok) {
@@ -281,7 +285,41 @@
     ) {
       return window.location.origin;
     }
-    return "https://site-llm-bot-742231208085.asia-northeast1.run.app";
+    if (baseUrl.hostname === new URL(developmentApiBase).hostname) {
+      return developmentApiBase;
+    }
+    return productionApiBase;
+  }
+
+  function resolveVisitorId() {
+    const storageKey = "site-llm-bot-visitor-id";
+    const storage = resolveLocalStorage();
+    if (storage) {
+      const existing = storage.getItem(storageKey);
+      if (existing) {
+        return existing;
+      }
+      const nextId = generateVisitorId();
+      storage.setItem(storageKey, nextId);
+      return nextId;
+    }
+    return generateVisitorId();
+  }
+
+  function resolveLocalStorage() {
+    try {
+      return window.localStorage || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function generateVisitorId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    const randomValue = Math.random().toString(36).slice(2, 12);
+    return `${Date.now().toString(36)}-${randomValue}`;
   }
 
   // パネルのタイトルに tenantName を埋め込むための最低限のエスケープ関数。

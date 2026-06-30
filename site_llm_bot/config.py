@@ -35,6 +35,14 @@ class Settings:
     widget_api_base: str
     default_tenant_id: str
     tenants: dict[str, "TenantConfig"] = field(default_factory=dict)
+    analytics_enabled: bool = False
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
+    supabase_timeout_seconds: float = 10.0
+    # RAG（pgvector）設定。embedding_model はプラットフォーム側の取り込みと一致させること。
+    openai_embedding_model: str = "text-embedding-3-small"
+    rag_match_count: int = 5
+    rag_min_similarity: float = 0.35
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -53,6 +61,18 @@ class Settings:
             widget_api_base=os.getenv("WIDGET_API_BASE", "").rstrip("/"),
             default_tenant_id=tenant_settings.default_tenant_id,
             tenants=tenant_settings.tenants,
+            analytics_enabled=parse_bool_env(os.getenv("ANALYTICS_ENABLED"), default=False),
+            supabase_url=normalize_optional_env(os.getenv("SUPABASE_URL")),
+            supabase_service_role_key=normalize_optional_env(
+                os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+                or os.getenv("SUPABASE_SECRET_KEY")
+            ),
+            supabase_timeout_seconds=float(os.getenv("SUPABASE_TIMEOUT_SECONDS", "10")),
+            openai_embedding_model=os.getenv(
+                "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
+            ),
+            rag_match_count=int(os.getenv("RAG_MATCH_COUNT", "5")),
+            rag_min_similarity=float(os.getenv("RAG_MIN_SIMILARITY", "0.35")),
         )
 
 
@@ -82,6 +102,21 @@ class TenantSettings:
 def parse_csv_env(value: str) -> list[str]:
     """カンマ区切り環境変数を配列へ変換する。"""
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_bool_env(value: str | None, default: bool = False) -> bool:
+    """真偽値の環境変数を bool に変換する。"""
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def normalize_optional_env(value: str | None) -> str | None:
+    """空文字の環境変数を None に寄せる。"""
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def load_tenant_settings(path: str) -> TenantSettings:

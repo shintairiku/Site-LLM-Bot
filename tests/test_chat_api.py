@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+import io
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -13,8 +16,20 @@ if str(ROOT_DIR) not in sys.path:
 
 from site_llm_bot.api.app import create_app
 from site_llm_bot.config import Settings, TenantConfig, load_tenant_settings
-from site_llm_bot.services.session_store import ChatMessage
+from site_llm_bot.services.analytics_store import (
+    AnalyticsStore,
+    ChatMessageSentEvent,
+    JsonAnalyticsStore,
+    LoggingAnalyticsStore,
+    RelatedLinkClickEvent,
+    SupabaseChatMessageSentStore,
+    SupabaseRelatedLinkClickStore,
+    UserFirstSeenEvent,
+    mask_pii,
+)
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
+from site_llm_bot.services.session_store import ChatMessage
+from site_llm_bot.services.unique_user_store import SupabaseUniqueUserStore
 
 
 @pytest.fixture
@@ -72,6 +87,54 @@ def widget_headers(
     }
 
 
+class RecordingAnalyticsStore(AnalyticsStore):
+    """テスト用に記録イベントをメモリへ保持する。"""
+
+    def __init__(self) -> None:
+        self.events: list[ChatMessageSentEvent] = []
+        self.user_first_seen_events: list[UserFirstSeenEvent] = []
+
+    def record_chat_message_sent(self, event: ChatMessageSentEvent) -> None:
+        self.events.append(event)
+
+    def record_user_first_seen(self, event: UserFirstSeenEvent) -> None:
+        self.user_first_seen_events.append(event)
+
+
+class RecordingChatMessageSentStore:
+    """テスト用にDB記録対象イベントをメモリへ保持する。"""
+
+    def __init__(self) -> None:
+        self.events: list[ChatMessageSentEvent] = []
+
+    async def record(self, event: ChatMessageSentEvent) -> None:
+        self.events.append(event)
+
+
+class FailingChatMessageSentStore:
+    """テスト用にDB記録失敗を発生させる。"""
+
+    async def record(self, event: ChatMessageSentEvent) -> None:
+        raise RuntimeError("failed to write analytics")
+
+
+class RecordingRelatedLinkClickStore:
+    """テスト用に関連リンククリックイベントをメモリへ保持する。"""
+
+    def __init__(self) -> None:
+        self.events: list[RelatedLinkClickEvent] = []
+
+    async def record(self, event: RelatedLinkClickEvent) -> None:
+        self.events.append(event)
+
+
+class FailingRelatedLinkClickStore:
+    """テスト用に関連リンククリック記録失敗を発生させる。"""
+
+    async def record(self, event: RelatedLinkClickEvent) -> None:
+        raise RuntimeError("failed to write related link click")
+
+
 def test_default_tenant_uses_configured_allowed_domains() -> None:
     tenant_settings = load_tenant_settings("config/tenants.json")
     tenant = tenant_settings.tenants[tenant_settings.default_tenant_id]
@@ -118,12 +181,369 @@ def test_settings_reads_widget_api_base_from_env(
     )
     monkeypatch.setenv("TENANT_CONFIG_PATH", str(tenant_config))
     monkeypatch.setenv("WIDGET_API_BASE", "https://dev-backend.example.com/")
+    monkeypatch.setenv("ANALYTICS_ENABLED", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://project-ref.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.setenv("SUPABASE_TIMEOUT_SECONDS", "5")
     monkeypatch.delenv("OPENAI_TIMEOUT_SECONDS", raising=False)
 
     settings = Settings.from_env()
 
     assert settings.widget_api_base == "https://dev-backend.example.com"
     assert settings.openai_timeout_seconds == 90.0
+    assert settings.analytics_enabled is True
+    assert settings.supabase_url == "https://project-ref.supabase.co"
+    assert settings.supabase_service_role_key == "service-role-key"
+    assert settings.supabase_timeout_seconds == 5.0
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_calls_record_unique_user_rpc() -> None:
+    seen_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {
+            "p_tenant_id": "sample-shintairiku",
+            "p_visitor_id": "visitor-1",
+            "p_origin": "https://tenant-one.example.com",
+            "p_page_url": "https://tenant-one.example.com/reform",
+        }
+        assert request.headers["apikey"] == "service-role-key"
+        assert request.headers["authorization"] == "Bearer service-role-key"
+        return httpx.Response(200, json=True)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen(
+            "sample-shintairiku",
+            "visitor-1",
+            origin="https://tenant-one.example.com",
+            page_url="https://tenant-one.example.com/reform",
+        )
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is True
+    assert str(seen_requests[0].url) == (
+        "https://project-ref.supabase.co/rest/v1/rpc/record_unique_user"
+    )
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_returns_false_for_existing_user() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=False)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co/",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen("sample-shintairiku", "visitor-1")
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is False
+
+
+@pytest.mark.anyio
+async def test_supabase_unique_user_store_omits_authorization_for_secret_key() -> None:
+    seen_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers)
+        return httpx.Response(200, json=True)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseUniqueUserStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="sb_secret_test-key",
+        client=client,
+    )
+
+    try:
+        is_first_seen = await store.mark_seen("sample-shintairiku", "visitor-1")
+    finally:
+        await client.aclose()
+
+    assert is_first_seen is True
+    assert seen_headers[0]["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in seen_headers[0]
+
+
+@pytest.mark.anyio
+async def test_supabase_chat_message_sent_store_calls_record_chat_message_sent_rpc() -> None:
+    seen_requests: list[httpx.Request] = []
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {
+            "p_tenant_id": "sample-shintairiku",
+            "p_session_id": "session-1",
+            "p_visitor_id": "visitor-1",
+            "p_origin": "https://tenant-one.example.com",
+            "p_page_url": "https://tenant-one.example.com/reform",
+            "p_occurred_at": occurred_at.isoformat(),
+            "p_question_text": "リフォームの費用はいくらですか？",
+        }
+        assert request.headers["apikey"] == "service-role-key"
+        assert request.headers["authorization"] == "Bearer service-role-key"
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseChatMessageSentStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            ChatMessageSentEvent(
+                tenant_id="sample-shintairiku",
+                session_id="session-1",
+                visitor_id="visitor-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                occurred_at=occurred_at,
+                question_text="リフォームの費用はいくらですか？",
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert str(seen_requests[0].url) == (
+        "https://project-ref.supabase.co/rest/v1/rpc/record_chat_message_sent"
+    )
+
+
+@pytest.mark.anyio
+async def test_supabase_chat_message_sent_store_omits_authorization_for_secret_key() -> None:
+    seen_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers)
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseChatMessageSentStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="sb_secret_test-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            ChatMessageSentEvent(
+                tenant_id="sample-shintairiku",
+                session_id="session-1",
+                visitor_id=None,
+                origin=None,
+                page_url=None,
+                occurred_at=datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC),
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert seen_headers[0]["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in seen_headers[0]
+
+
+@pytest.mark.anyio
+async def test_supabase_related_link_click_store_calls_record_related_link_click_rpc() -> None:
+    seen_requests: list[httpx.Request] = []
+    clicked_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {
+            "p_tenant_id": "sample-shintairiku",
+            "p_link_url": "https://shintairiku.jp/company/",
+            "p_visitor_id": "visitor-1",
+            "p_session_id": "session-1",
+            "p_origin": "https://tenant-one.example.com",
+            "p_page_url": "https://tenant-one.example.com/reform",
+            "p_clicked_at": clicked_at.isoformat(),
+        }
+        assert request.headers["apikey"] == "service-role-key"
+        assert request.headers["authorization"] == "Bearer service-role-key"
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseRelatedLinkClickStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="service-role-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            RelatedLinkClickEvent(
+                tenant_id="sample-shintairiku",
+                link_url="https://shintairiku.jp/company/",
+                visitor_id="visitor-1",
+                session_id="session-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                clicked_at=clicked_at,
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert str(seen_requests[0].url) == (
+        "https://project-ref.supabase.co/rest/v1/rpc/record_related_link_click"
+    )
+
+
+@pytest.mark.anyio
+async def test_supabase_related_link_click_store_omits_authorization_for_secret_key() -> None:
+    seen_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers)
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    store = SupabaseRelatedLinkClickStore(
+        supabase_url="https://project-ref.supabase.co",
+        service_role_key="sb_secret_test-key",
+        client=client,
+    )
+
+    try:
+        await store.record(
+            RelatedLinkClickEvent(
+                tenant_id="sample-shintairiku",
+                link_url="https://shintairiku.jp/company/",
+                origin=None,
+                page_url=None,
+                clicked_at=datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC),
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert seen_headers[0]["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in seen_headers[0]
+
+
+def test_logging_analytics_store_writes_structured_chat_message_event() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("site_llm_bot.test.analytics")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.addHandler(handler)
+    store = LoggingAnalyticsStore(logger=logger)
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    try:
+        store.record_chat_message_sent(
+            ChatMessageSentEvent(
+                tenant_id="sample-shintairiku",
+                session_id="session-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                occurred_at=occurred_at,
+            )
+        )
+    finally:
+        logger.removeHandler(handler)
+
+    assert json.loads(stream.getvalue()) == {
+        "event_type": "chat_message_sent",
+        "tenant_id": "sample-shintairiku",
+        "session_id": "session-1",
+        "visitor_id": None,
+        "origin": "https://tenant-one.example.com",
+        "page_url": "https://tenant-one.example.com/reform",
+        "occurred_at": occurred_at.isoformat(),
+        "question_text": None,
+        "message": "chat_message_sent",
+        "severity": "INFO",
+    }
+
+
+def test_logging_analytics_store_writes_user_first_seen_event() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("site_llm_bot.test.analytics.user")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.addHandler(handler)
+    store = LoggingAnalyticsStore(logger=logger)
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    try:
+        store.record_user_first_seen(
+            UserFirstSeenEvent(
+                tenant_id="sample-shintairiku",
+                visitor_id="visitor-1",
+                origin="https://tenant-one.example.com",
+                page_url="https://tenant-one.example.com/reform",
+                occurred_at=occurred_at,
+            )
+        )
+    finally:
+        logger.removeHandler(handler)
+
+    assert json.loads(stream.getvalue()) == {
+        "event_type": "user_first_seen",
+        "tenant_id": "sample-shintairiku",
+        "visitor_id": "visitor-1",
+        "origin": "https://tenant-one.example.com",
+        "page_url": "https://tenant-one.example.com/reform",
+        "occurred_at": occurred_at.isoformat(),
+        "message": "user_first_seen",
+        "severity": "INFO",
+    }
+
+
+def test_json_analytics_store_writes_chat_message_event(tmp_path: Path) -> None:
+    path = tmp_path / "analytics" / "chat-message-events.jsonl"
+    store = JsonAnalyticsStore(path)
+    occurred_at = datetime(2026, 5, 30, 1, 2, 3, tzinfo=UTC)
+
+    store.record_chat_message_sent(
+        ChatMessageSentEvent(
+            tenant_id="sample-shintairiku",
+            session_id="session-1",
+            origin="https://tenant-one.example.com",
+            page_url="https://tenant-one.example.com/reform",
+            occurred_at=occurred_at,
+        )
+    )
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {
+        "event_type": "chat_message_sent",
+        "tenant_id": "sample-shintairiku",
+        "session_id": "session-1",
+        "visitor_id": None,
+        "origin": "https://tenant-one.example.com",
+        "page_url": "https://tenant-one.example.com/reform",
+        "occurred_at": occurred_at.isoformat(),
+        "question_text": None,
+    }
 
 
 @pytest.mark.anyio
@@ -155,7 +575,14 @@ async def test_chat_api_with_mock_openai() -> None:
         )
 
     openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
+    analytics_store = RecordingAnalyticsStore()
+    chat_message_sent_store = RecordingChatMessageSentStore()
+    app = create_app(
+        settings=build_settings(),
+        openai_client=openai_client,
+        analytics_store=analytics_store,
+        chat_message_sent_store=chat_message_sent_store,
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -167,6 +594,7 @@ async def test_chat_api_with_mock_openai() -> None:
                 "tenant_id": "sample-shintairiku",
                 "message": "施工エリアを教えてください",
                 "page_url": "http://localhost/demo",
+                "visitor_id": "visitor-1",
             },
             headers=widget_headers(),
         )
@@ -178,6 +606,21 @@ async def test_chat_api_with_mock_openai() -> None:
     assert "【会社情報】" in response.json()["answer"]
     assert "https://shintairiku.jp/company/" in response.json()["answer"]
     assert response.json()["session_id"]
+    assert len(analytics_store.events) == 1
+    assert analytics_store.events[0].tenant_id == "sample-shintairiku"
+    assert analytics_store.events[0].session_id == response.json()["session_id"]
+    assert analytics_store.events[0].visitor_id == "visitor-1"
+    assert analytics_store.events[0].origin == "https://tenant-one.example.com"
+    assert analytics_store.events[0].page_url == "http://localhost/demo"
+    assert len(chat_message_sent_store.events) == 1
+    assert chat_message_sent_store.events[0].tenant_id == "sample-shintairiku"
+    assert chat_message_sent_store.events[0].session_id == response.json()["session_id"]
+    assert chat_message_sent_store.events[0].visitor_id == "visitor-1"
+    assert chat_message_sent_store.events[0].origin == "https://tenant-one.example.com"
+    assert chat_message_sent_store.events[0].page_url == "http://localhost/demo"
+    assert len(analytics_store.user_first_seen_events) == 1
+    assert analytics_store.user_first_seen_events[0].tenant_id == "sample-shintairiku"
+    assert analytics_store.user_first_seen_events[0].visitor_id == "visitor-1"
     await openai_client.aclose()
 
 
@@ -366,7 +809,12 @@ async def test_chat_api_returns_gateway_timeout_when_openai_times_out() -> None:
         raise httpx.ReadTimeout("request timed out", request=request)
 
     openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(
+        settings=build_settings(),
+        openai_client=openai_client,
+        analytics_store=analytics_store,
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -380,6 +828,8 @@ async def test_chat_api_returns_gateway_timeout_when_openai_times_out() -> None:
 
     assert response.status_code == 504
     assert response.json()["detail"] == "OpenAI request timed out: request timed out"
+    assert len(analytics_store.events) == 1
+    assert analytics_store.events[0].tenant_id == "sample-shintairiku"
     await openai_client.aclose()
 
 
@@ -441,6 +891,61 @@ async def test_chat_api_demo_fallback_without_api_key() -> None:
     assert response.json()["source"] == "demo"
     assert "デモモード" in response.json()["answer"]
     assert response.json()["session_id"]
+
+
+@pytest.mark.anyio
+async def test_chat_api_continues_when_chat_message_db_recording_fails() -> None:
+    app = create_app(
+        settings=build_settings(api_key=None),
+        chat_message_sent_store=FailingChatMessageSentStore(),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/chat",
+            json={"message": "相談の流れを知りたいです"},
+            headers=widget_headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "demo"
+    assert response.json()["session_id"]
+
+
+@pytest.mark.anyio
+async def test_chat_api_records_user_first_seen_only_once_per_visitor() -> None:
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(settings=build_settings(api_key=None), analytics_store=analytics_store)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        first_response = await client.post(
+            "/api/chat",
+            json={
+                "message": "相談の流れを知りたいです",
+                "visitor_id": "visitor-repeat",
+            },
+            headers=widget_headers(),
+        )
+        second_response = await client.post(
+            "/api/chat",
+            json={
+                "message": "施工エリアを教えてください",
+                "visitor_id": "visitor-repeat",
+            },
+            headers=widget_headers(),
+        )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert len(analytics_store.events) == 2
+    assert len(analytics_store.user_first_seen_events) == 1
+    assert analytics_store.user_first_seen_events[0].visitor_id == "visitor-repeat"
 
 
 @pytest.mark.anyio
@@ -511,7 +1016,12 @@ async def test_v1_chat_message_with_mock_openai() -> None:
         )
 
     openai_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings=build_settings(), openai_client=openai_client)
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(
+        settings=build_settings(),
+        openai_client=openai_client,
+        analytics_store=analytics_store,
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -527,7 +1037,10 @@ async def test_v1_chat_message_with_mock_openai() -> None:
             json={
                 "session_id": session_response.json()["session_id"],
                 "message": "施工エリアを教えてください",
-                "metadata": {"page_url": "https://tenant-one.example.com/reform"},
+                "metadata": {
+                    "page_url": "https://tenant-one.example.com/reform",
+                    "visitor_id": "visitor-2",
+                },
             },
         )
 
@@ -535,12 +1048,164 @@ async def test_v1_chat_message_with_mock_openai() -> None:
     assert response.json()["source"] == "openai"
     assert response.json()["session_id"] == session_response.json()["session_id"]
     assert "施工エリア" in response.json()["answer"]
+    assert len(analytics_store.events) == 1
+    assert analytics_store.events[0].tenant_id == "sample-shintairiku"
+    assert analytics_store.events[0].session_id == session_response.json()["session_id"]
+    assert analytics_store.events[0].visitor_id == "visitor-2"
+    assert analytics_store.events[0].origin == "https://tenant-one.example.com"
+    assert analytics_store.events[0].page_url == "https://tenant-one.example.com/reform"
+    assert len(analytics_store.user_first_seen_events) == 1
+    assert analytics_store.user_first_seen_events[0].visitor_id == "visitor-2"
     await openai_client.aclose()
 
 
 @pytest.mark.anyio
-async def test_v1_api_rejects_invalid_widget_token() -> None:
+async def test_v1_related_link_click_records_allowed_link() -> None:
+    related_link_click_store = RecordingRelatedLinkClickStore()
+    app = create_app(
+        settings=build_settings(api_key=None),
+        related_link_click_store=related_link_click_store,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/v1/analytics/related-link-click",
+            headers=widget_headers(),
+            json={
+                "link_url": "https://www.shintairiku.jp/company/#detail",
+                "metadata": {
+                    "page_url": "https://tenant-one.example.com/reform",
+                    "visitor_id": "visitor-2",
+                    "session_id": "session-1",
+                },
+            },
+        )
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert len(related_link_click_store.events) == 1
+    event = related_link_click_store.events[0]
+    assert event.tenant_id == "sample-shintairiku"
+    assert event.link_url == "https://www.shintairiku.jp/company/"
+    assert event.visitor_id == "visitor-2"
+    assert event.session_id == "session-1"
+    assert event.origin == "https://tenant-one.example.com"
+    assert event.page_url == "https://tenant-one.example.com/reform"
+
+
+@pytest.mark.anyio
+async def test_v1_related_link_click_rejects_disallowed_link() -> None:
+    related_link_click_store = RecordingRelatedLinkClickStore()
+    app = create_app(
+        settings=build_settings(api_key=None),
+        related_link_click_store=related_link_click_store,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/v1/analytics/related-link-click",
+            headers=widget_headers(),
+            json={"link_url": "https://example.com/company/"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "link url is not allowed"
+    assert related_link_click_store.events == []
+
+
+@pytest.mark.anyio
+async def test_v1_related_link_click_continues_when_db_recording_fails() -> None:
+    app = create_app(
+        settings=build_settings(api_key=None),
+        related_link_click_store=FailingRelatedLinkClickStore(),
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/v1/analytics/related-link-click",
+            headers=widget_headers(),
+            json={"link_url": "https://shintairiku.jp/company/"},
+        )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+@pytest.mark.anyio
+async def test_api_access_log_includes_required_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     app = create_app(settings=build_settings(api_key=None))
+
+    with caplog.at_level(logging.INFO, logger="site_llm_bot.access"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/v1/widget/config",
+                headers=widget_headers()
+                | {"X-Forwarded-For": "203.0.113.10, 10.0.0.1"},
+            )
+
+    assert response.status_code == 200
+    access_logs = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "site_llm_bot.access"
+    ]
+    assert access_logs
+    latest = access_logs[-1]
+    assert latest["tenant_id"] == "sample-shintairiku"
+    assert latest["origin"] == "https://tenant-one.example.com"
+    assert latest["ip"] == "203.0.113.10"
+    assert latest["path"] == "/v1/widget/config"
+    assert latest["status_code"] == 200
+    assert isinstance(latest["latency_ms"], float)
+
+
+@pytest.mark.anyio
+async def test_api_access_log_records_auth_error_status(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    with caplog.at_level(logging.INFO, logger="site_llm_bot.access"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.get(
+                "/v1/widget/config",
+                headers=widget_headers(token="wrong-token")
+                | {"X-Real-IP": "203.0.113.20"},
+            )
+
+    assert response.status_code == 403
+    access_logs = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "site_llm_bot.access"
+    ]
+    assert access_logs[-1]["tenant_id"] == "sample-shintairiku"
+    assert access_logs[-1]["ip"] == "203.0.113.20"
+    assert access_logs[-1]["path"] == "/v1/widget/config"
+    assert access_logs[-1]["status_code"] == 403
+
+
+@pytest.mark.anyio
+async def test_v1_api_rejects_invalid_widget_token() -> None:
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(settings=build_settings(api_key=None), analytics_store=analytics_store)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -549,6 +1214,28 @@ async def test_v1_api_rejects_invalid_widget_token() -> None:
         response = await client.get(
             "/v1/widget/config",
             headers=widget_headers(token="wrong-token"),
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "invalid widget token"
+    assert analytics_store.events == []
+
+
+@pytest.mark.anyio
+async def test_v1_api_rejects_widget_token_from_other_tenant() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/v1/widget/config",
+            headers=widget_headers(
+                tenant_id="tenant-two",
+                token="public_sample_shintairiku",
+                origin="https://tenant-two.example.com",
+            ),
         )
 
     assert response.status_code == 403
@@ -599,7 +1286,8 @@ async def test_chat_api_cors_allows_registered_origin() -> None:
 
 @pytest.mark.anyio
 async def test_chat_api_rejects_invalid_widget_token() -> None:
-    app = create_app(settings=build_settings(api_key=None))
+    analytics_store = RecordingAnalyticsStore()
+    app = create_app(settings=build_settings(api_key=None), analytics_store=analytics_store)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -613,6 +1301,7 @@ async def test_chat_api_rejects_invalid_widget_token() -> None:
 
     assert response.status_code == 403
     assert response.json()["detail"] == "invalid widget token"
+    assert analytics_store.events == []
 
 
 @pytest.mark.anyio
@@ -709,6 +1398,7 @@ def test_demo_and_static_routes_exist() -> None:
     assert "/v1/widget/config" in paths
     assert "/v1/chat/session" in paths
     assert "/v1/chat/message" in paths
+    assert "/v1/analytics/related-link-click" in paths
     assert "/v1/chat/stream" not in paths
 
 
@@ -721,11 +1411,23 @@ def test_distribution_widget_assets_exist() -> None:
     assert (ROOT_DIR / "public" / "static" / "tenants" / "sample-shintairiku.css").exists()
 
     widget_js = (ROOT_DIR / "static" / "widget.js").read_text(encoding="utf-8")
+    public_widget_js = (ROOT_DIR / "public" / "static" / "widget.js").read_text(
+        encoding="utf-8"
+    )
     widget_css = (ROOT_DIR / "static" / "widget.css").read_text(encoding="utf-8")
     assert 'new URL("widget.css", baseUrl)' in widget_js
     assert 'new URL("tenants/", baseUrl)' in widget_js
+    assert "developmentApiBase" in widget_js
+    assert "site-llm-bot-visitor-id" in widget_js
+    assert "visitor_id: visitorId" in widget_js
+    assert "site-llm-bot-dev-742231208085.asia-northeast1.run.app" in widget_js
+    assert "site-llm-bot-742231208085.asia-northeast1.run.app" in widget_js
     assert "ensureTenantCss(tenantId)" in widget_js
     assert "/v1/chat/message" in widget_js
+    assert "/v1/analytics/related-link-click" in widget_js
+    assert "/v1/analytics/related-link-click" in public_widget_js
+    assert "siteLlmBotRelatedLink" in widget_js
+    assert "siteLlmBotRelatedLink" in public_widget_js
     assert "/v1/chat/stream" not in widget_js
     assert "requestChatMessage" in widget_js
     assert "requestChatStream" not in widget_js
@@ -738,11 +1440,48 @@ def test_distribution_widget_assets_exist() -> None:
 
 
 @pytest.mark.anyio
-async def test_demo_page_injects_widget_api_base() -> None:
+async def test_demo_page_uses_same_origin_widget_and_configured_api_base() -> None:
+    app = create_app(settings=build_settings(api_key=None))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/demo")
+
+    assert response.status_code == 200
+    assert 'src="/static/widget.js"' in response.text
+    assert 'data-api-base=""' in response.text
+    assert 'data-public-token="public_sample_shintairiku"' in response.text
+    assert "data-color" not in response.text
+    assert "site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js" not in response.text
+    assert "__WIDGET_API_BASE__" not in response.text
+
+
+@pytest.mark.parametrize("text,expected", [
+    # メールアドレス
+    ("連絡先はtaro@example.comです", "連絡先は[MASKED]です"),
+    # 電話番号（ハイフン区切り）
+    ("電話は090-1234-5678まで", "電話は[MASKED]まで"),
+    # 電話番号（固定電話）
+    ("03-1234-5678に連絡", "[MASKED]に連絡"),
+    # 郵便番号（〒含む）
+    ("〒123-4567に住んでいます", "[MASKED]に住んでいます"),
+    # クレジットカード番号
+    ("カード番号は1234-5678-9012-3456です", "カード番号は[MASKED]です"),
+    # PII なし（変換なし）
+    ("リフォームの費用はいくらですか？", "リフォームの費用はいくらですか？"),
+])
+def test_mask_pii(text: str, expected: str) -> None:
+    assert mask_pii(text) == expected
+
+
+@pytest.mark.anyio
+async def test_demo_page_uses_configured_widget_api_base() -> None:
     app = create_app(
         settings=build_settings(
             api_key=None,
-            widget_api_base="https://dev-backend.example.com",
+            widget_api_base="https://site-llm-bot-dev-742231208085.asia-northeast1.run.app",
         )
     )
 
@@ -753,9 +1492,7 @@ async def test_demo_page_injects_widget_api_base() -> None:
         response = await client.get("/demo")
 
     assert response.status_code == 200
-    assert 'src="/static/widget.js"' in response.text
-    assert 'data-api-base="https://dev-backend.example.com"' in response.text
-    assert 'data-public-token="public_sample_shintairiku"' in response.text
-    assert "data-color" not in response.text
-    assert "site-llm-bot-742231208085.asia-northeast1.run.app/static/mock-widget.js" not in response.text
-    assert "__WIDGET_API_BASE__" not in response.text
+    assert (
+        'data-api-base="https://site-llm-bot-dev-742231208085.asia-northeast1.run.app"'
+        in response.text
+    )
