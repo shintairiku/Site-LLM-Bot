@@ -34,6 +34,7 @@ from site_llm_bot.services.analytics_store import (
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
 from site_llm_bot.services.prompt_store import SupabasePromptStore
+from site_llm_bot.services.rag_retriever import SupabaseRagRetriever
 from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
 from site_llm_bot.services.unique_user_store import (
     InMemoryUniqueUserStore,
@@ -141,6 +142,7 @@ def create_app(
     session_feedback_store: SessionFeedbackStore | None = None,
     unique_user_store: UniqueUserStore | None = None,
     prompt_store: SupabasePromptStore | None = None,
+    rag_retriever: SupabaseRagRetriever | None = None,
 ) -> FastAPI:
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
@@ -156,6 +158,7 @@ def create_app(
     )
     unique_user_store = unique_user_store or create_unique_user_store(app_settings)
     prompt_store = prompt_store or create_prompt_store(app_settings)
+    rag_retriever = rag_retriever or create_rag_retriever(app_settings)
     if analytics_store is None and app_settings.analytics_enabled:
         analytics_store = LoggingAnalyticsStore()
 
@@ -267,6 +270,7 @@ def create_app(
             chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
             prompt_store=prompt_store,
+            rag_retriever=rag_retriever,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
@@ -303,6 +307,7 @@ def create_app(
             chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
             prompt_store=prompt_store,
+            rag_retriever=rag_retriever,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.page_url,
@@ -396,6 +401,7 @@ async def generate_chat_response(
     chat_message_sent_store: ChatMessageSentStore | None,
     unique_user_store: UniqueUserStore,
     prompt_store: SupabasePromptStore | None,
+    rag_retriever: SupabaseRagRetriever | None,
     session_id: str | None,
     message: str,
     page_url: str | None,
@@ -466,11 +472,23 @@ async def generate_chat_response(
     if prompt_store is not None:
         system_prompt = await prompt_store.fetch(tenant.tenant_id)
 
+    knowledge_context: list[str] = []
+    if rag_retriever is not None:
+        chunks = await rag_retriever.retrieve(tenant.tenant_id, normalized_message)
+        knowledge_context = [chunk.content for chunk in chunks]
+        logging.getLogger("site_llm_bot.rag").info(
+            "rag retrieval tenant=%s hits=%d top_similarity=%.3f",
+            tenant.tenant_id,
+            len(chunks),
+            chunks[0].similarity if chunks else 0.0,
+        )
+
     chat_handler = OpenAIChatHandler(
         api_key=settings.openai_api_key,
         model=settings.openai_model,
         search_allowed_domains=tenant.allowed_domains,
         system_prompt=system_prompt,
+        knowledge_context=knowledge_context,
         timeout_seconds=settings.openai_timeout_seconds,
         client=openai_client,
     )
@@ -535,6 +553,21 @@ def create_prompt_store(settings: Settings) -> SupabasePromptStore | None:
         return SupabasePromptStore(
             supabase_url=settings.supabase_url,
             service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return None
+
+
+def create_rag_retriever(settings: Settings) -> SupabaseRagRetriever | None:
+    """Supabase設定があればpgvectorの類似度検索でナレッジを取得する。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabaseRagRetriever(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            openai_api_key=settings.openai_api_key,
+            embedding_model=settings.openai_embedding_model,
+            match_count=settings.rag_match_count,
+            min_similarity=settings.rag_min_similarity,
             timeout_seconds=settings.supabase_timeout_seconds,
         )
     return None

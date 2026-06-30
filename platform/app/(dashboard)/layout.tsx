@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAnalyticsData } from "@/lib/analytics";
-import { DashboardProvider, type PromptRecord } from "@/lib/dashboard-context";
+import { DashboardProvider, type PromptRecord, type DataSource } from "@/lib/dashboard-context";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 
@@ -19,22 +19,31 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  const [promptsResult, day, week, month] = await Promise.all([
+  const [promptsResult, dataSourcesResult, day, week, month] = await Promise.all([
     supabase
       .from("prompts")
       .select("id, content, note, created_by, created_at")
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("data_sources")
+      .select("id, kind, title, source_url, status, bytes, chunk_count, created_by, created_at")
+      .order("created_at", { ascending: false }),
     fetchAnalyticsData(supabase, "day"),
     fetchAnalyticsData(supabase, "week"),
     fetchAnalyticsData(supabase, "month"),
   ]);
 
   const initialPrompts: PromptRecord[] = promptsResult.data ?? [];
+  const initialDataSources: DataSource[] = dataSourcesResult.data ?? [];
   const initialAnalytics = { day, week, month };
 
   return (
-    <DashboardProvider initialPrompts={initialPrompts} initialAnalytics={initialAnalytics}>
+    <DashboardProvider
+      initialPrompts={initialPrompts}
+      initialDataSources={initialDataSources}
+      initialAnalytics={initialAnalytics}
+    >
       <div className="flex h-full overflow-hidden">
         <Sidebar />
         <div className="flex-1 flex flex-col overflow-hidden">

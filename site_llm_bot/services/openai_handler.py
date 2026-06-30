@@ -63,6 +63,7 @@ class OpenAIChatHandler:
         model: str,
         search_allowed_domains: list[str] | None = None,
         system_prompt: str | None = None,
+        knowledge_context: list[str] | None = None,
         timeout_seconds: float = 30.0,
         client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -70,6 +71,7 @@ class OpenAIChatHandler:
         self._model = model
         self._search_allowed_domains = search_allowed_domains or []
         self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._knowledge_context = knowledge_context or []
         self._timeout_seconds = timeout_seconds
         self._client = client
 
@@ -115,6 +117,14 @@ class OpenAIChatHandler:
             developer_instruction += (
                 " 回答前にWeb検索ツールで対象サイトを確認し、"
                 f" 次のドメインのみを根拠にしてください: {', '.join(self._search_allowed_domains)}"
+            )
+        if self._knowledge_context:
+            knowledge_block = "\n\n---\n\n".join(self._knowledge_context)
+            developer_instruction += (
+                " 加えて、管理者が登録した社内ナレッジから質問に関連する抜粋を以下に提供します。"
+                " 質問に関係する内容が含まれていれば根拠として活用してください。"
+                " 関連しない場合は無視して構いません。\n\n"
+                f"【社内ナレッジ抜粋】\n{knowledge_block}"
             )
 
         user_text = message if not page_url else f"閲覧ページ: {page_url}\n質問: {message}"
@@ -266,6 +276,10 @@ class OpenAIChatHandler:
 
     def _is_source_inspection_allowed(self, inspection: SourceInspection) -> bool:
         if not self._search_allowed_domains:
+            return True
+        # 管理者が登録した社内ナレッジ（pgvectorで類似ヒットしてコンテキスト注入済み）が
+        # ある場合は、信頼できる根拠が提供されているとみなして回答を許可する。
+        if self._knowledge_context:
             return True
         return (
             inspection.used_web_search
