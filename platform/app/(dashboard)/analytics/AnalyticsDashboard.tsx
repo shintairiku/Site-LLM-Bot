@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -8,9 +8,24 @@ import {
 import { useDashboard } from "@/lib/dashboard-context";
 import type { Period } from "@/lib/analytics";
 
+// 分析画面を開いている間だけ、数分ごとに最新の集計へ更新する。
+const POLL_INTERVAL_MS = 3 * 60 * 1000;
+
 export default function AnalyticsDashboard() {
-  const { analytics } = useDashboard();
+  const { analytics, refreshAnalytics } = useDashboard();
   const [period, setPeriod] = useState<Period>("week");
+
+  // このコンポーネント（分析画面）がマウントされている間だけポーリングする。
+  // 画面を離れるとアンマウントされ、自動的に停止する。
+  useEffect(() => {
+    const id = setInterval(() => {
+      // 非表示タブでは無駄なフェッチを避ける
+      if (document.visibilityState === "visible") {
+        refreshAnalytics();
+      }
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [refreshAnalytics]);
 
   const data = period === "day" ? analytics.day : period === "week" ? analytics.week : analytics.month;
 
