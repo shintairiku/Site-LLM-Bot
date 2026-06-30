@@ -39,6 +39,10 @@ class Settings:
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
     supabase_timeout_seconds: float = 10.0
+    # RAG（pgvector）設定。embedding_model はプラットフォーム側の取り込みと一致させること。
+    openai_embedding_model: str = "text-embedding-3-small"
+    rag_match_count: int = 5
+    rag_min_similarity: float = 0.35
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -64,6 +68,11 @@ class Settings:
                 or os.getenv("SUPABASE_SECRET_KEY")
             ),
             supabase_timeout_seconds=float(os.getenv("SUPABASE_TIMEOUT_SECONDS", "10")),
+            openai_embedding_model=os.getenv(
+                "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
+            ),
+            rag_match_count=int(os.getenv("RAG_MATCH_COUNT", "5")),
+            rag_min_similarity=float(os.getenv("RAG_MIN_SIMILARITY", "0.35")),
         )
 
 

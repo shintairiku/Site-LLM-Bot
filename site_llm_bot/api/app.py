@@ -24,12 +24,17 @@ from site_llm_bot.services.analytics_store import (
     LoggingAnalyticsStore,
     RelatedLinkClickEvent,
     RelatedLinkClickStore,
+    SessionFeedbackEvent,
+    SessionFeedbackStore,
     SupabaseChatMessageSentStore,
     SupabaseRelatedLinkClickStore,
+    SupabaseSessionFeedbackStore,
     UserFirstSeenEvent,
     mask_pii,
 )
 from site_llm_bot.services.openai_handler import OpenAIChatHandler
+from site_llm_bot.services.prompt_store import SupabasePromptStore
+from site_llm_bot.services.rag_retriever import SupabaseRagRetriever
 from site_llm_bot.services.session_store import InMemorySessionStore, TenantSessionMismatch
 from site_llm_bot.services.unique_user_store import (
     InMemoryUniqueUserStore,
@@ -113,13 +118,31 @@ class RelatedLinkClickRequest(BaseModel):
     )
 
 
+class SessionFeedbackMetadata(BaseModel):
+    """セッションフィードバックに付随するメタデータ。"""
+
+    page_url: str | None = None
+    visitor_id: str | None = None
+    session_id: str | None = None
+
+
+class SessionFeedbackRequest(BaseModel):
+    """セッションフィードバック記録APIの入力。"""
+
+    resolved: bool
+    metadata: SessionFeedbackMetadata = Field(default_factory=SessionFeedbackMetadata)
+
+
 def create_app(
     settings: Settings | None = None,
     openai_client: httpx.AsyncClient | None = None,
     analytics_store: AnalyticsStore | None = None,
     chat_message_sent_store: ChatMessageSentStore | None = None,
     related_link_click_store: RelatedLinkClickStore | None = None,
+    session_feedback_store: SessionFeedbackStore | None = None,
     unique_user_store: UniqueUserStore | None = None,
+    prompt_store: SupabasePromptStore | None = None,
+    rag_retriever: SupabaseRagRetriever | None = None,
 ) -> FastAPI:
     """工程4向けの最小 FastAPI アプリを生成する。"""
     app_settings = settings or Settings.from_env()
@@ -130,7 +153,12 @@ def create_app(
     related_link_click_store = (
         related_link_click_store or create_related_link_click_store(app_settings)
     )
+    session_feedback_store = (
+        session_feedback_store or create_session_feedback_store(app_settings)
+    )
     unique_user_store = unique_user_store or create_unique_user_store(app_settings)
+    prompt_store = prompt_store or create_prompt_store(app_settings)
+    rag_retriever = rag_retriever or create_rag_retriever(app_settings)
     if analytics_store is None and app_settings.analytics_enabled:
         analytics_store = LoggingAnalyticsStore()
 
@@ -241,6 +269,8 @@ def create_app(
             analytics_store=analytics_store,
             chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
+            prompt_store=prompt_store,
+            rag_retriever=rag_retriever,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.metadata.page_url,
@@ -276,6 +306,8 @@ def create_app(
             analytics_store=analytics_store,
             chat_message_sent_store=chat_message_sent_store,
             unique_user_store=unique_user_store,
+            prompt_store=prompt_store,
+            rag_retriever=rag_retriever,
             session_id=chat_request.session_id,
             message=chat_request.message,
             page_url=chat_request.page_url,
@@ -321,6 +353,41 @@ def create_app(
         )
         return Response(status_code=204)
 
+    @app.post("/v1/analytics/session-feedback", status_code=204)
+    async def session_feedback(
+        feedback_request: SessionFeedbackRequest,
+        http_request: Request,
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+        x_widget_token: str | None = Header(default=None, alias="X-Widget-Token"),
+    ) -> Response:
+        """セッションフィードバック（解決/未解決）を記録する。"""
+        origin = http_request.headers.get("origin")
+        tenant = authenticate_widget_request(
+            settings=app_settings,
+            request_tenant_id=None,
+            header_tenant_id=x_tenant_id,
+            widget_token=x_widget_token,
+            origin=origin,
+        )
+        http_request.state.tenant_id = tenant.tenant_id
+        session_id = normalize_session_id(feedback_request.metadata.session_id)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+
+        await record_session_feedback(
+            session_feedback_store=session_feedback_store,
+            event=SessionFeedbackEvent(
+                tenant_id=tenant.tenant_id,
+                session_id=session_id,
+                resolved=feedback_request.resolved,
+                visitor_id=normalize_visitor_id(feedback_request.metadata.visitor_id),
+                origin=origin,
+                page_url=feedback_request.metadata.page_url,
+                occurred_at=datetime.now(UTC),
+            ),
+        )
+        return Response(status_code=204)
+
     return app
 
 
@@ -333,6 +400,8 @@ async def generate_chat_response(
     analytics_store: AnalyticsStore | None,
     chat_message_sent_store: ChatMessageSentStore | None,
     unique_user_store: UniqueUserStore,
+    prompt_store: SupabasePromptStore | None,
+    rag_retriever: SupabaseRagRetriever | None,
     session_id: str | None,
     message: str,
     page_url: str | None,
@@ -398,10 +467,28 @@ async def generate_chat_response(
         limit=settings.max_history_messages,
     )
     session_store.append_message(session.session_id, "user", normalized_message)
+
+    system_prompt: str | None = None
+    if prompt_store is not None:
+        system_prompt = await prompt_store.fetch(tenant.tenant_id)
+
+    knowledge_context: list[str] = []
+    if rag_retriever is not None:
+        chunks = await rag_retriever.retrieve(tenant.tenant_id, normalized_message)
+        knowledge_context = [chunk.content for chunk in chunks]
+        logging.getLogger("site_llm_bot.rag").info(
+            "rag retrieval tenant=%s hits=%d top_similarity=%.3f",
+            tenant.tenant_id,
+            len(chunks),
+            chunks[0].similarity if chunks else 0.0,
+        )
+
     chat_handler = OpenAIChatHandler(
         api_key=settings.openai_api_key,
         model=settings.openai_model,
         search_allowed_domains=tenant.allowed_domains,
+        system_prompt=system_prompt,
+        knowledge_context=knowledge_context,
         timeout_seconds=settings.openai_timeout_seconds,
         client=openai_client,
     )
@@ -438,12 +525,49 @@ def create_chat_message_sent_store(settings: Settings) -> ChatMessageSentStore |
     return None
 
 
+def create_session_feedback_store(settings: Settings) -> SessionFeedbackStore | None:
+    """Supabase設定があればセッションフィードバックイベントをDBへ記録する。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabaseSessionFeedbackStore(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return None
+
+
 def create_related_link_click_store(settings: Settings) -> RelatedLinkClickStore | None:
     """Supabase設定があれば関連リンククリックイベントをDBへ記録する。"""
     if settings.supabase_url and settings.supabase_service_role_key:
         return SupabaseRelatedLinkClickStore(
             supabase_url=settings.supabase_url,
             service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return None
+
+
+def create_prompt_store(settings: Settings) -> SupabasePromptStore | None:
+    """Supabase設定があればプロンプトをDBから取得する。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabasePromptStore(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
+    return None
+
+
+def create_rag_retriever(settings: Settings) -> SupabaseRagRetriever | None:
+    """Supabase設定があればpgvectorの類似度検索でナレッジを取得する。"""
+    if settings.supabase_url and settings.supabase_service_role_key:
+        return SupabaseRagRetriever(
+            supabase_url=settings.supabase_url,
+            service_role_key=settings.supabase_service_role_key,
+            openai_api_key=settings.openai_api_key,
+            embedding_model=settings.openai_embedding_model,
+            match_count=settings.rag_match_count,
+            min_similarity=settings.rag_min_similarity,
             timeout_seconds=settings.supabase_timeout_seconds,
         )
     return None
@@ -473,6 +597,22 @@ async def record_chat_message_sent(
     except Exception:
         logging.getLogger("site_llm_bot.analytics").exception(
             "failed to record chat message sent"
+        )
+
+
+async def record_session_feedback(
+    *,
+    session_feedback_store: SessionFeedbackStore | None,
+    event: SessionFeedbackEvent,
+) -> None:
+    """セッションフィードバックイベントをDBへ記録する。失敗してもフィードバック導線は止めない。"""
+    if session_feedback_store is None:
+        return
+    try:
+        await session_feedback_store.record(event)
+    except Exception:
+        logging.getLogger("site_llm_bot.analytics").exception(
+            "failed to record session feedback"
         )
 
 
